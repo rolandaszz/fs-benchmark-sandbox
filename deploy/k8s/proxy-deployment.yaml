@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vfs-connect-proxy
+  namespace: vfs-system
+  labels:
+    app.kubernetes.io/name: vfs-connect-proxy
+    app.kubernetes.io/component: serving-proxy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vfs-connect-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vfs-connect-proxy
+        app.kubernetes.io/component: serving-proxy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: proxy
+          image: ghcr.io/fs-benchmark/vfs-connect-proxy:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: h2c
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PROXY_LISTEN_ADDR
+              value: ":8080"
+            - name: DEFAULT_TARGET_ENGINE
+              value: "pgvector"
+            - name: PGVECTOR_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: vfs-pgvector-credentials
+                  key: dsn
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "2000m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: h2c
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: h2c
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

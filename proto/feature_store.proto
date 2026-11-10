@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package vfs.v1;
+
+option go_package = "github.com/fs-benchmark/fs-benchmark-sandbox/gen/vfs/v1;vfsv1";
+
+// ItemFeatures represents a catalog item embedding and scalar ranking metadata
+// served by the Vector Feature Store (VFS) online plane.
+message ItemFeatures {
+  string item_id = 1;
+  repeated float embedding = 2; // 768-dimensional float embedding vector
+  string brand_id = 3;
+  string category = 4;
+  float price_eur = 5;
+  string seller_country = 6;
+  int64 updated_at_unix_ms = 7;
+}
+
+message GetItemFeaturesRequest {
+  string item_id = 1;
+}
+
+message GetItemFeaturesResponse {
+  ItemFeatures item = 1;
+  bool found = 2;
+}
+
+message BatchGetItemFeaturesRequest {
+  repeated string item_ids = 1;
+}
+
+message BatchGetItemFeaturesResponse {
+  repeated ItemFeatures items = 1;
+  repeated string missing_item_ids = 2;
+}
+
+message UpsertItemFeaturesRequest {
+  repeated ItemFeatures items = 1;
+}
+
+message UpsertItemFeaturesResponse {
+  uint32 upserted_count = 1;
+}
+
+message SearchSimilarItemsRequest {
+  repeated float query_embedding = 1; // 768-dimensional float query vector
+  uint32 top_k = 2;
+  float max_price_eur = 3;
+  repeated string seller_countries = 4;
+}
+
+message ScoredItemFeatures {
+  ItemFeatures item = 1;
+  float cosine_similarity = 2;
+}
+
+message SearchSimilarItemsResponse {
+  repeated ScoredItemFeatures hits = 1;
+}
+
+// FeatureStoreService exposes ultra-low-latency (<25ms p99) feature retrieval,
+// filtered ANN vector similarity search, and real-time feature ingestion.
+service FeatureStoreService {
+  rpc GetItemFeatures(GetItemFeaturesRequest) returns (GetItemFeaturesResponse);
+  rpc BatchGetItemFeatures(BatchGetItemFeaturesRequest) returns (BatchGetItemFeaturesResponse);
+  rpc UpsertItemFeatures(UpsertItemFeaturesRequest) returns (UpsertItemFeaturesResponse);
+  rpc SearchSimilarItems(SearchSimilarItemsRequest) returns (SearchSimilarItemsResponse);
+}

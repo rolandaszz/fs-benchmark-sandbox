@@ -10,11 +10,11 @@
 
 To maintain strict benchmarking validity on a developer workstation without sacrificing systems fidelity, distributed production patterns are adapted into an isolated, sequential local harness:
 
-| Component | Role | Concept → Sandbox Reality | Comprehension (1-5) |
+| Component | Role | Concept → Sandbox | Comprehension (1-5) |
 | :--- | :--- | :--- | :---: |
 | **Vector Engines** | System Under Test | Concurrent multi-DB cluster → **Sequential 1-container lifecycle** (`pgvector`, Qdrant, Vespa, Milvus; 4GB cap + cache flush) | `_` |
-| **Serving Proxy** | L7 Edge Gateway | Envoy/Istio mesh or Python gateway → **Go ConnectRPC binary (`h2c`)** routing via `X-Target-Engine` on `:8080` | `_` |
-| **Observability** | SLA Telemetry | Full Grafana/OTel stack (15s scrape) → **Standalone Prometheus** (`1s` scrape of `vfs_request_duration_seconds`) | `_` |
+| **Serving Proxy** | L7 Edge Gateway | Network/Service mesh → **Go ConnectRPC binary (`h2c`)** routing via `X-Target-Engine` on `:8080` | `_` |
+| **Observability** | SLA Telemetry | Full Grafana/OTel stack → **Standalone Prometheus** (`1s` scrape of `vfs_request_duration_seconds`) | `_` |
 | **Chaos Agent** | Fault Injection | K8s Chaos Mesh daemonset → **Host Linux `tc netem` & `cgroups v2`** controlled from Python | `_` |
 | **SRE Evaluator** | Tail-Latency Triage | Inline generative LLM (1.5–4s lag) → **Out-of-band OpenAI Decisions API (`gpt-6-luna`)** (`predicate`, `choice`, `score`) | `_` |
 | **Workflow Engine** | Incident Mitigation | Multi-container Temporal cluster → **`temporalio` in-memory test server** (optional Docker profile) running LIFO Sagas | `_` |

@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vfs-connect-proxy
+  namespace: vfs-system
+  labels:
+    app.kubernetes.io/name: vfs-connect-proxy
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vfs-connect-proxy
+  namespaceSelector:
+    matchNames:
+      - vfs-system
+  endpoints:
+    - port: h2c
+      path: /metrics
+      interval: 1s
+      scrapeTimeout: 900ms

@@ -8,9 +8,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: vfs
-      POSTGRES_PASSWORD: vfs_bench_pass
-      POSTGRES_DB: vfs_benchmark
+      POSTGRES_USER: ${POSTGRES_USER:-pguser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pgpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-vfs_benchmark}
     command:
       - "postgres"
       - "-c"
@@ -36,7 +36,7 @@ services:
       - pgvector_data:/var/lib/postgresql/data
       - ./solution/engine_adapters/pgvector/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vfs -d vfs_benchmark"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pguser} -d ${POSTGRES_DB:-vfs_benchmark}"]
       interval: 2s
       timeout: 2s
       retries: 15
@@ -56,7 +56,7 @@ services:
     environment:
       PROXY_LISTEN_ADDR: ":8080"
       DEFAULT_TARGET_ENGINE: "pgvector"
-      PGVECTOR_DSN: "postgres://vfs:vfs_bench_pass@pgvector:5432/vfs_benchmark?sslmode=disable"
+      PGVECTOR_DSN: "postgres://${POSTGRES_USER:-pguser}:${POSTGRES_PASSWORD:-pgpassword}@pgvector:5432/${POSTGRES_DB:-vfs_benchmark}?sslmode=disable"
     cpus: 1.0
     mem_limit: 512m
     deploy:
@@ -121,8 +121,8 @@ services:
     environment:
       DB: postgres12
       DB_PORT: 5432
-      POSTGRES_USER: vfs
-      POSTGRES_PWD: vfs_bench_pass
+      POSTGRES_USER: ${POSTGRES_USER:-pguser}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-pgpassword}
       POSTGRES_SEEDS: pgvector
     cpus: 1.0
     mem_limit: 1g

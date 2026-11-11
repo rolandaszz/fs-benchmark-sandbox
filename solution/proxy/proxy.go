@@ -625,7 +625,11 @@ func main() {
 
 	listenAddr := getenvDefault("PROXY_LISTEN_ADDR", ":8080")
 	defaultEngine := strings.ToLower(getenvDefault("DEFAULT_TARGET_ENGINE", "pgvector"))
-	pgDSN := getenvDefault("PGVECTOR_DSN", "postgres://vfs:vfs_bench_pass@localhost:5432/vfs_benchmark?sslmode=disable")
+	pgDSN := strings.TrimSpace(os.Getenv("PGVECTOR_DSN"))
+	if pgDSN == "" {
+		slog.Error("PGVECTOR_DSN environment variable is required")
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

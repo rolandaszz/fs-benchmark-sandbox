@@ -51,7 +51,7 @@ curl -sf http://localhost:9090/api/v1/targets | grep -q '"health":"up"' && echo 
 
 #### 2. Compile the Go Serving Proxy Binary (Standalone / Local Check)
 ```bash
-# Compile proto/feature_store.proto and build ./bin/proxy
+# Lint/generate Protobuf via Buf and compile ./bin/proxy
 make build
 ```
 
@@ -74,8 +74,14 @@ make test-unit
 
 ```text
 .
+├── buf.yaml                        # Buf v2 module and lint configuration
+├── buf.gen.yaml                    # Buf code generation template for ConnectRPC
+├── pyproject.toml                  # PEP 621 Python project metadata & tool configurations
+├── uv.lock                         # Deterministic pinned Python lockfile
 ├── proto/
-│   └── feature_store.proto         # ConnectRPC schema (768-dim vectors + metadata)
+│   └── vfs/
+│       └── v1/
+│           └── feature_store.proto # ConnectRPC schema (768-dim vectors + metadata)
 ├── solution/
 │   ├── proxy/                      # Go L7 h2c reverse proxy shim, Dockerfile & tests
 │   └── engine_adapters/

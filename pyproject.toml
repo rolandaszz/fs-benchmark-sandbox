@@ -1,0 +1,28 @@
+[project]
+name = "fs-benchmark-sandbox"
+version = "0.1.0"
+description = "High-throughput vector DB benchmarking harness with out-of-band Decisions API triage"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "httpx[http2]>=0.28.1",
+    "pydantic>=2.10.6",
+    "temporalio>=1.9.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+pythonpath = ["."]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

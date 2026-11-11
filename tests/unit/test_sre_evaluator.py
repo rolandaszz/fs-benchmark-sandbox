@@ -1,8 +1,6 @@
-"""Unit tests for the OpenAI Responses API payload builder and SRE triage verdicts."""
+"""Unit tests for the OpenAI Decisions API payload builder and SRE triage verdicts."""
 
 from __future__ import annotations
-
-import json
 
 import httpx
 import pytest
@@ -11,26 +9,23 @@ from harness.sre_evaluator import (
     MitigationAction,
     SREEvaluator,
     TelemetrySnapshot,
-    build_responses_api_payload,
+    build_decisions_api_payload,
     evaluate_locally,
 )
 
 
-def test_responses_api_payload_contains_structured_json_schema() -> None:
+def test_decisions_api_payload_contains_typed_primitives() -> None:
     snap = TelemetrySnapshot(engine="pgvector", p99_latency_ms=18.4, rps=4200.0, error_rate=0.0)
-    payload = build_responses_api_payload(snap)
+    payload = build_decisions_api_payload(snap)
 
-    assert payload["model"] == "gpt-4o-mini"
-    fmt = payload["text"]["format"]
-    assert fmt["type"] == "json_schema"
-    assert fmt["strict"] is True
-    props = fmt["schema"]["properties"]
-    assert props["is_sla_breached"]["type"] == "boolean"
-    assert props["action"]["type"] == "string"
-    assert set(props["action"]["enum"]) == {m.value for m in MitigationAction}
-    assert props["stability_score"]["type"] == "integer"
-    assert props["stability_score"]["minimum"] == 1
-    assert props["stability_score"]["maximum"] == 5
+    assert payload["model"] == "gpt-6-luna"
+    decisions = payload["decisions"]
+    assert decisions["is_sla_breached"]["type"] == "predicate"
+    assert decisions["action"]["type"] == "choice"
+    assert set(decisions["action"]["options"]) == {m.value for m in MitigationAction}
+    assert decisions["stability_score"]["type"] == "score"
+    assert decisions["stability_score"]["min"] == 1
+    assert decisions["stability_score"]["max"] == 5
 
 
 def test_local_evaluation_respects_25ms_sla_boundary() -> None:
@@ -53,30 +48,17 @@ def test_local_evaluation_respects_25ms_sla_boundary() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sre_evaluator_parses_openai_responses_verdict() -> None:
+async def test_sre_evaluator_parses_gpt_6_luna_decisions_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/v1/responses"
-        verdict_json = json.dumps(
-            {
-                "is_sla_breached": True,
-                "action": "TRIGGER_TEMPORAL_SAGA",
-                "stability_score": 2,
-            }
-        )
+        assert request.url.path == "/v1/decisions"
         return httpx.Response(
             200,
             json={
-                "output": [
-                    {
-                        "type": "message",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": verdict_json,
-                            }
-                        ],
-                    }
-                ]
+                "decisions": {
+                    "is_sla_breached": True,
+                    "action": "TRIGGER_TEMPORAL_SAGA",
+                    "stability_score": 2,
+                }
             },
         )
 
@@ -84,7 +66,7 @@ async def test_sre_evaluator_parses_openai_responses_verdict() -> None:
     async with httpx.AsyncClient(transport=transport) as mock_client:
         evaluator = SREEvaluator(
             api_key="sk-test-valid-key",
-            openai_endpoint="https://api.openai.com/v1/responses",
+            decisions_endpoint="https://api.openai.com/v1/decisions",
             http_client=mock_client,
         )
         snap = TelemetrySnapshot(engine="pgvector", p99_latency_ms=42.0, rps=3100.0, error_rate=0.02)
@@ -93,4 +75,4 @@ async def test_sre_evaluator_parses_openai_responses_verdict() -> None:
     assert verdict.is_sla_breached is True
     assert verdict.action == MitigationAction.TRIGGER_TEMPORAL_SAGA
     assert verdict.stability_score == 2
-    assert verdict.source == "gpt-4o-mini"
+    assert verdict.source == "gpt-6-luna"

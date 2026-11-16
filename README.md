@@ -98,7 +98,7 @@ make test-unit
 │   ├── unit/                       # Telemetry parsing, Chaos & Temporal Saga unit tests
 │   └── integration/                # End-to-end container benchmark passes
 ├── docker-compose.yaml             # Single-target engine, proxy & Prometheus definitions
-├── prometheus.yml                  # 1s scrape config with sub-millisecond histogram buckets
+├── prometheus.yaml                 # 1s scrape config with sub-millisecond histogram buckets
 └── Makefile                        # Build, lifecycle, and benchmark automation targets
 ```
 

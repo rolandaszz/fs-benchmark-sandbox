@@ -21,13 +21,17 @@ services:
       - "maintenance_work_mem=512MB"
       - "-c"
       - "max_connections=200"
-    cpus: 2.0
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "hnsw.iterative_scan=relaxed_order"
+    cpus: 4.0
     mem_limit: 4g
     memswap_limit: 4g
     deploy:
       resources:
         limits:
-          cpus: "2.0"
+          cpus: "4.0"
           memory: 4G
         reservations:
           cpus: "1.0"
@@ -57,12 +61,12 @@ services:
       PROXY_LISTEN_ADDR: ":8080"
       DEFAULT_TARGET_ENGINE: "pgvector"
       PGVECTOR_DSN: "postgres://${POSTGRES_USER:-pguser}:${POSTGRES_PASSWORD:-pgpassword}@pgvector:5432/${POSTGRES_DB:-vfs_benchmark}?sslmode=disable"
-    cpus: 1.0
+    cpus: 2.0
     mem_limit: 512m
     deploy:
       resources:
         limits:
-          cpus: "1.0"
+          cpus: "2.0"
           memory: 512M
     depends_on:
       pgvector:

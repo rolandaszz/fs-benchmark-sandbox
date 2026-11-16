@@ -63,6 +63,11 @@ func NewPgVectorBackend(ctx context.Context, dsn string) (*PgVectorBackend, erro
 	cfg.MinConns = 4
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.MaxConnIdleTime = 5 * time.Minute
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = make(map[string]string)
+	}
+	cfg.ConnConfig.RuntimeParams["hnsw.iterative_scan"] = "relaxed_order"
+	cfg.ConnConfig.RuntimeParams["random_page_cost"] = "1.1"
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -233,7 +238,7 @@ func (b *PgVectorBackend) SearchSimilar(
 	switch {
 	case maxPrice > 0 && len(countries) > 0:
 		const q = `
-			SELECT item_id, embedding::text, brand_id, category, price_eur, seller_country, updated_at,
+			SELECT item_id, brand_id, category, price_eur, seller_country, updated_at,
 			       1.0 - (embedding <=> $1::vector(768)) AS cosine_similarity
 			FROM items
 			WHERE price_eur <= $2 AND seller_country = ANY($3)
@@ -243,7 +248,7 @@ func (b *PgVectorBackend) SearchSimilar(
 		rows, err = b.pool.Query(ctx, q, vecLit, maxPrice, countries, topK)
 	case maxPrice > 0:
 		const q = `
-			SELECT item_id, embedding::text, brand_id, category, price_eur, seller_country, updated_at,
+			SELECT item_id, brand_id, category, price_eur, seller_country, updated_at,
 			       1.0 - (embedding <=> $1::vector(768)) AS cosine_similarity
 			FROM items
 			WHERE price_eur <= $2
@@ -251,9 +256,19 @@ func (b *PgVectorBackend) SearchSimilar(
 			LIMIT $3
 		`
 		rows, err = b.pool.Query(ctx, q, vecLit, maxPrice, topK)
+	case len(countries) > 0:
+		const q = `
+			SELECT item_id, brand_id, category, price_eur, seller_country, updated_at,
+			       1.0 - (embedding <=> $1::vector(768)) AS cosine_similarity
+			FROM items
+			WHERE seller_country = ANY($2)
+			ORDER BY embedding <=> $1::vector(768)
+			LIMIT $3
+		`
+		rows, err = b.pool.Query(ctx, q, vecLit, countries, topK)
 	default:
 		const q = `
-			SELECT item_id, embedding::text, brand_id, category, price_eur, seller_country, updated_at,
+			SELECT item_id, brand_id, category, price_eur, seller_country, updated_at,
 			       1.0 - (embedding <=> $1::vector(768)) AS cosine_similarity
 			FROM items
 			ORDER BY embedding <=> $1::vector(768)
@@ -269,21 +284,16 @@ func (b *PgVectorBackend) SearchSimilar(
 	var hits []*vfsv1.ScoredItemFeatures
 	for rows.Next() {
 		var (
-			id, vecText, brandID, category, country string
-			price, sim                              float32
-			updatedAt                               time.Time
+			id, brandID, category, country string
+			price, sim                     float32
+			updatedAt                      time.Time
 		)
-		if err := rows.Scan(&id, &vecText, &brandID, &category, &price, &country, &updatedAt, &sim); err != nil {
-			return nil, err
-		}
-		vec, err := parseVectorLiteral(vecText)
-		if err != nil {
+		if err := rows.Scan(&id, &brandID, &category, &price, &country, &updatedAt, &sim); err != nil {
 			return nil, err
 		}
 		hits = append(hits, &vfsv1.ScoredItemFeatures{
 			Item: &vfsv1.ItemFeatures{
 				ItemId:          id,
-				Embedding:       vec,
 				BrandId:         brandID,
 				Category:        category,
 				PriceEur:        price,
@@ -317,14 +327,20 @@ func parseVectorLiteral(lit string) ([]float32, error) {
 	if trimmed == "" {
 		return nil, nil
 	}
-	parts := strings.Split(trimmed, ",")
-	out := make([]float32, len(parts))
-	for i, p := range parts {
-		val, err := strconv.ParseFloat(strings.TrimSpace(p), 32)
-		if err != nil {
-			return nil, fmt.Errorf("parse vector element %d: %w", i, err)
+	out := make([]float32, 0, 768)
+	start := 0
+	for i := 0; i <= len(trimmed); i++ {
+		if i == len(trimmed) || trimmed[i] == ',' {
+			token := strings.TrimSpace(trimmed[start:i])
+			if token != "" {
+				val, err := strconv.ParseFloat(token, 32)
+				if err != nil {
+					return nil, fmt.Errorf("parse vector element %d: %w", len(out), err)
+				}
+				out = append(out, float32(val))
+			}
+			start = i + 1
 		}
-		out[i] = float32(val)
 	}
 	return out, nil
 }

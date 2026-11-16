@@ -189,6 +189,20 @@ func TestConnectRPCProxyH2CRoutingAndTelemetry(t *testing.T) {
 		t.Fatalf("expected 1 ANN hit, got %d", len(searchResp.Msg.GetHits()))
 	}
 
+	searchCountryReq := connect.NewRequest(&vfsv1.SearchSimilarItemsRequest{
+		QueryEmbedding:  makeTestEmbedding(0.25),
+		TopK:            5,
+		MaxPriceEur:     0.0,
+		SellerCountries: []string{"FR"},
+	})
+	searchCountryResp, err := rpcClient.SearchSimilarItems(ctx, searchCountryReq)
+	if err != nil {
+		t.Fatalf("SearchSimilarItems country-only failed: %v", err)
+	}
+	if len(searchCountryResp.Msg.GetHits()) != 1 {
+		t.Fatalf("expected 1 hit for country-only filter FR, got %d", len(searchCountryResp.Msg.GetHits()))
+	}
+
 	inactiveReq := connect.NewRequest(&vfsv1.GetItemFeaturesRequest{ItemId: "item-lt-001"})
 	inactiveReq.Header().Set(TargetEngineHeader, "vespa")
 	_, err = rpcClient.GetItemFeatures(ctx, inactiveReq)

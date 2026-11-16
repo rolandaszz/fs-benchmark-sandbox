@@ -48,9 +48,13 @@ class BenchmarkOrchestrator:
         self,
         seed_count: int = 200,
         request_count: int = 200,
+        skip_seed: bool = False,
     ) -> OrchestratorRunReport:
         self.chaos_agent.drop_os_page_cache()
-        seeded = await self.traffic_agent.seed_catalog(item_count=seed_count)
+        seeded = seed_count if skip_seed else await self.traffic_agent.seed_catalog(item_count=seed_count)
+        if not skip_seed and seed_count > 0:
+            # Give Prometheus sliding window buffer to isolate online traffic from bulk batches
+            await asyncio.sleep(2)
         traffic_summary = await self.traffic_agent.run_workload_mix(
             total_requests=request_count,
             catalog_size=seed_count,
@@ -85,13 +89,16 @@ def main() -> None:
     parser.add_argument("--engine", default="pgvector", choices=["pgvector"])
     parser.add_argument("--seed-count", type=int, default=200)
     parser.add_argument("--requests", type=int, default=200)
+    parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--skip-seed", action="store_true", help="Skip re-seeding if catalog is already populated")
     args = parser.parse_args()
 
-    orchestrator = BenchmarkOrchestrator(engine=args.engine)
+    orchestrator = BenchmarkOrchestrator(engine=args.engine, concurrency=args.concurrency)
     report = asyncio.run(
         orchestrator.execute_single_target_run(
             seed_count=args.seed_count,
             request_count=args.requests,
+            skip_seed=args.skip_seed,
         )
     )
     print(json.dumps(asdict(report), indent=2))

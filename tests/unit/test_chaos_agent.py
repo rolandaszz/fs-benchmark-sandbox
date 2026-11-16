@@ -46,3 +46,6 @@ def test_cgroup_v2_path_confinement() -> None:
 
     with pytest.raises(ChaosValidationError):
         agent.apply_cgroup_v2_limits(CgroupLimits(cgroup_path="/tmp/not_a_cgroup"))
+
+    with pytest.raises(ChaosValidationError):
+        agent.apply_cgroup_v2_limits(CgroupLimits(cgroup_path="/sys/fs/cgroup_evil"))

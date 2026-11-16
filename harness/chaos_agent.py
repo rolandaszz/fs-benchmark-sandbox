@@ -94,7 +94,7 @@ class ChaosAgent:
             raise ChaosValidationError("memory_max_bytes must be at least 64 MiB")
 
         cg_dir = Path(limits.cgroup_path).resolve()
-        if not str(cg_dir).startswith("/sys/fs/cgroup"):
+        if not cg_dir.is_relative_to(Path("/sys/fs/cgroup")):
             raise ChaosValidationError(f"cgroup_path must reside under /sys/fs/cgroup: {cg_dir}")
 
         payload = {

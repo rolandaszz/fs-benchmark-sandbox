@@ -7,7 +7,6 @@ metadata:
     app.kubernetes.io/name: vfs-connect-proxy
 spec:
   type: ClusterIP
-  appProtocol: kubernetes.io/h2c
   selector:
     app.kubernetes.io/name: vfs-connect-proxy
   ports:
@@ -15,3 +14,4 @@ spec:
       port: 8080
       targetPort: h2c
       protocol: TCP
+      appProtocol: kubernetes.io/h2c

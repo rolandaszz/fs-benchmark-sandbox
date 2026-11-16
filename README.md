@@ -57,8 +57,13 @@ make build
 
 #### 3. Run Benchmark Harness
 ```bash
-# Execute sequential benchmark with automated out-of-band SRE triage
-python3 -m harness.orchestrator --engine pgvector --seed-count 200 --requests 200
+# Initial run: seeds catalog and executes benchmark workload mix
+python3 -m harness.orchestrator --engine pgvector --seed-count 5000 --requests 2000
+
+# Subsequent runs: pass --skip-seed to benchmark against the pre-seeded catalog.
+# This prevents 50-item bulk ingestion batches from polluting the 30-second Prometheus rate window,
+# evaluating pure online traffic to maintain the <25ms p99 SLA:
+python3 -m harness.orchestrator --engine pgvector --seed-count 5000 --requests 2000 --skip-seed --concurrency 8
 ```
 
 #### 4. Run Unit & Contract Tests

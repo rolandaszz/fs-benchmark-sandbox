@@ -1,4 +1,4 @@
-"""End-to-end integration test against live Docker Compose pgvector, Go h2c proxy, and Prometheus."""
+"""End-to-end integration test against live Docker Compose engines, Go h2c proxy, and Prometheus."""
 
 from __future__ import annotations
 
@@ -13,9 +13,10 @@ RUN_INTEGRATION = os.getenv("RUN_VFS_INTEGRATION", "0") == "1"
 
 
 @pytest.mark.skipif(not RUN_INTEGRATION, reason="Set RUN_VFS_INTEGRATION=1 with docker compose stack running")
+@pytest.mark.parametrize("engine", ["pgvector", "qdrant"])
 @pytest.mark.asyncio
-async def test_end_to_end_pgvector_proxy_and_prometheus_scrape() -> None:
-    agent = TrafficAgent(proxy_url="http://localhost:8080", target_engine="pgvector", concurrency=8)
+async def test_end_to_end_engine_proxy_and_prometheus_scrape(engine: str) -> None:
+    agent = TrafficAgent(proxy_url="http://localhost:8080", target_engine=engine, concurrency=8)
     seeded = await agent.seed_catalog(item_count=40, batch_size=20)
     assert seeded == 40
 

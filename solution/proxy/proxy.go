@@ -591,12 +591,17 @@ func (p *FeatureStoreProxy) SearchSimilarItems(
 	return resp, nil
 }
 
-// NewProxyHTTPHandler wires the ConnectRPC handler, /metrics, and /healthz onto an h2c HTTP/2 mux.
+// NewProxyHTTPHandler wires the ConnectRPC handler, /metrics, /livez, and /healthz onto an h2c HTTP/2 mux.
 func NewProxyHTTPHandler(proxy *FeatureStoreProxy) http.Handler {
 	mux := http.NewServeMux()
 	path, connectHandler := vfsv1connect.NewFeatureStoreServiceHandler(proxy)
 	mux.Handle(path, connectHandler)
 	mux.Handle("/metrics", promhttp.HandlerFor(proxy.telemetry.Registry, promhttp.HandlerOpts{}))
+	mux.HandleFunc("/livez", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"alive"}`))
+	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
 		defer cancel()
@@ -660,10 +665,24 @@ func main() {
 	}
 	defer pgBackend.Close()
 
-	telemetry := NewProxyTelemetry(defaultEngine)
 	backends := map[string]EngineBackend{
 		"pgvector": pgBackend,
 	}
+
+	qdrantURL := strings.TrimSpace(os.Getenv("QDRANT_URL"))
+	qdrantCollection := getenvDefault("QDRANT_COLLECTION", "items")
+	if qdrantURL != "" {
+		qdrantBackend, err := NewQdrantBackend(ctx, qdrantURL, qdrantCollection)
+		if err != nil {
+			slog.Error("failed to initialize qdrant backend", "error", err)
+			os.Exit(1)
+		}
+		defer qdrantBackend.Close()
+		backends["qdrant"] = qdrantBackend
+		slog.Info("qdrant backend initialized", "url", qdrantURL, "collection", qdrantCollection)
+	}
+
+	telemetry := NewProxyTelemetry(defaultEngine)
 	proxy := NewFeatureStoreProxy(defaultEngine, backends, telemetry)
 
 	srv := &http.Server{

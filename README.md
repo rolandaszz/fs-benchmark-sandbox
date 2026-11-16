@@ -10,11 +10,11 @@
 
 To maintain strict benchmarking validity on a developer workstation without sacrificing systems fidelity, distributed production patterns are adapted into an isolated, sequential local harness:
 
-| Component | Role | Concept → Sandbox Reality | Comprehension (1-5) |
+| Component | Role | Concept → Sandbox | Comprehension (1-5) |
 | :--- | :--- | :--- | :---: |
 | **Vector Engines** | System Under Test | Concurrent multi-DB cluster → **Sequential 1-container lifecycle** (`pgvector`, Qdrant, Vespa, Milvus; 4GB cap + cache flush) | `_` |
-| **Serving Proxy** | L7 Edge Gateway | Envoy/Istio mesh or Python gateway → **Go ConnectRPC binary (`h2c`)** routing via `X-Target-Engine` on `:8080` | `_` |
-| **Observability** | SLA Telemetry | Full Grafana/OTel stack (15s scrape) → **Standalone Prometheus** (`1s` scrape of `vfs_request_duration_seconds`) | `_` |
+| **Serving Proxy** | L7 Edge Gateway | Network/Service mesh → **Go ConnectRPC binary (`h2c`)** routing via `X-Target-Engine` on `:8080` | `_` |
+| **Observability** | SLA Telemetry | Full Grafana/OTel stack → **Standalone Prometheus** (`1s` scrape of `vfs_request_duration_seconds`) | `_` |
 | **Chaos Agent** | Fault Injection | K8s Chaos Mesh daemonset → **Host Linux `tc netem` & `cgroups v2`** controlled from Python | `_` |
 | **SRE Evaluator** | Tail-Latency Triage | Inline generative LLM (1.5–4s lag) → **Out-of-band OpenAI Decisions API (`gpt-6-luna`)** (`predicate`, `choice`, `score`) | `_` |
 | **Workflow Engine** | Incident Mitigation | Multi-container Temporal cluster → **`temporalio` in-memory test server** (optional Docker profile) running LIFO Sagas | `_` |
@@ -51,14 +51,19 @@ curl -sf http://localhost:9090/api/v1/targets | grep -q '"health":"up"' && echo 
 
 #### 2. Compile the Go Serving Proxy Binary (Standalone / Local Check)
 ```bash
-# Compile proto/feature_store.proto and build ./bin/proxy
+# Lint/generate Protobuf via Buf and compile ./bin/proxy
 make build
 ```
 
 #### 3. Run Benchmark Harness
 ```bash
-# Execute sequential benchmark with automated out-of-band SRE triage
-python3 -m harness.orchestrator --engine pgvector --seed-count 200 --requests 200
+# Initial run: seeds catalog and executes benchmark workload mix
+python3 -m harness.orchestrator --engine pgvector --seed-count 5000 --requests 2000
+
+# Subsequent runs: pass --skip-seed to benchmark against the pre-seeded catalog.
+# This prevents 50-item bulk ingestion batches from polluting the 30-second Prometheus rate window,
+# evaluating pure online traffic to maintain the <25ms p99 SLA:
+python3 -m harness.orchestrator --engine pgvector --seed-count 5000 --requests 2000 --skip-seed --concurrency 8
 ```
 
 #### 4. Run Unit & Contract Tests
@@ -74,8 +79,14 @@ make test-unit
 
 ```text
 .
+├── buf.yaml                        # Buf v2 module and lint configuration
+├── buf.gen.yaml                    # Buf code generation template for ConnectRPC
+├── pyproject.toml                  # PEP 621 Python project metadata & tool configurations
+├── uv.lock                         # Deterministic pinned Python lockfile
 ├── proto/
-│   └── feature_store.proto         # ConnectRPC schema (768-dim vectors + metadata)
+│   └── vfs/
+│       └── v1/
+│           └── feature_store.proto # ConnectRPC schema (768-dim vectors + metadata)
 ├── solution/
 │   ├── proxy/                      # Go L7 h2c reverse proxy shim, Dockerfile & tests
 │   └── engine_adapters/
@@ -92,7 +103,7 @@ make test-unit
 │   ├── unit/                       # Telemetry parsing, Chaos & Temporal Saga unit tests
 │   └── integration/                # End-to-end container benchmark passes
 ├── docker-compose.yaml             # Single-target engine, proxy & Prometheus definitions
-├── prometheus.yml                  # 1s scrape config with sub-millisecond histogram buckets
+├── prometheus.yaml                 # 1s scrape config with sub-millisecond histogram buckets
 └── Makefile                        # Build, lifecycle, and benchmark automation targets
 ```
 

@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	vfsv1 "github.com/fs-benchmark/fs-benchmark-sandbox/gen/vfs/v1"
+	"github.com/fs-benchmark/fs-benchmark-sandbox/gen/vfs/v1/vfsv1connect"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	vfsv1 "github.com/fs-benchmark/fs-benchmark-sandbox/gen/vfs/v1"
-	"github.com/fs-benchmark/fs-benchmark-sandbox/gen/vfs/v1/vfsv1connect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )

@@ -196,6 +196,13 @@ func TestConnectRPCProxyH2CRoutingAndTelemetry(t *testing.T) {
 		t.Fatalf("expected CodeUnavailable for inactive engine vespa, got %v", err)
 	}
 
+	unknownReq := connect.NewRequest(&vfsv1.GetItemFeaturesRequest{ItemId: "item-lt-001"})
+	unknownReq.Header().Set(TargetEngineHeader, "untrusted-engine-header-999")
+	_, err = rpcClient.GetItemFeatures(ctx, unknownReq)
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument for unknown engine header, got %v", err)
+	}
+
 	metricsResp, err := http.Get(srv.URL + "/metrics")
 	if err != nil {
 		t.Fatalf("GET /metrics failed: %v", err)
@@ -208,5 +215,11 @@ func TestConnectRPCProxyH2CRoutingAndTelemetry(t *testing.T) {
 	metricsText := string(bodyBytes)
 	if !strings.Contains(metricsText, `vfs_request_duration_seconds_bucket{engine="pgvector",rpc="GetItemFeatures",status="ok",le="0.025"}`) {
 		t.Fatalf("expected 0.025s SLA bucket in /metrics output:\n%s", metricsText)
+	}
+	if !strings.Contains(metricsText, `vfs_request_duration_seconds_count{engine="unknown",rpc="GetItemFeatures",status="error"} 1`) {
+		t.Fatalf("expected unknown engine error count in /metrics output:\n%s", metricsText)
+	}
+	if strings.Contains(metricsText, "untrusted-engine-header-999") {
+		t.Fatalf("untrusted engine header leaked into Prometheus metrics:\n%s", metricsText)
 	}
 }

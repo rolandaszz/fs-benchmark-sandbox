@@ -395,7 +395,7 @@ func (p *FeatureStoreProxy) resolveBackend(headers http.Header) (EngineBackend, 
 		target = p.defaultEngine
 	}
 	if _, known := knownTargetEngines[target]; !known {
-		return nil, target, connect.NewError(
+		return nil, "unknown", connect.NewError(
 			connect.CodeInvalidArgument,
 			fmt.Errorf("unsupported %s header value %q", TargetEngineHeader, target),
 		)
@@ -411,6 +411,9 @@ func (p *FeatureStoreProxy) resolveBackend(headers http.Header) (EngineBackend, 
 }
 
 func (p *FeatureStoreProxy) observe(engine, rpc string, start time.Time, err error) {
+	if _, known := knownTargetEngines[engine]; !known {
+		engine = "unknown"
+	}
 	status := "ok"
 	if err != nil {
 		status = "error"

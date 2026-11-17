@@ -40,9 +40,9 @@ To maintain strict benchmarking validity on a developer workstation without sacr
 * Docker & Docker Compose v2 (`cgroups v2` enabled)
 * Python 3.12+ and Go 1.23+ (`Makefile` automatically falls back to a containerized Go 1.23 toolchain if `go`/`protoc` are not installed on the host)
 
-#### 1. Start Infrastructure & Target 1 (`pgvector` + `proxy` + `prometheus`)
+#### 1. Start Infrastructure (`pgvector`, `Qdrant`, `Vespa`, `proxy` & `prometheus`)
 ```bash
-# Build and launch pgvector, ConnectRPC proxy (:8080), and Prometheus (:9090)
+# Build and launch database engines, ConnectRPC proxy (:8080), and Prometheus (:9090)
 make up
 
 # Verify active Prometheus scrape target health
@@ -57,13 +57,14 @@ make build
 
 #### 3. Run Benchmark Harness
 ```bash
-# Initial run: seeds catalog and executes benchmark workload mix
-python3 -m harness.orchestrator --engine pgvector --seed-count 5000 --requests 2000
-
-# Subsequent runs: pass --skip-seed to benchmark against the pre-seeded catalog.
-# This prevents 50-item bulk ingestion batches from polluting the 30-second Prometheus rate window,
-# evaluating pure online traffic to maintain the <25ms p99 SLA:
+# Benchmark pgvector (Target 1)
 python3 -m harness.orchestrator --engine pgvector --seed-count 5000 --requests 2000 --skip-seed --concurrency 8
+
+# Benchmark Qdrant (Target 2)
+python3 -m harness.orchestrator --engine qdrant --seed-count 5000 --requests 2000 --skip-seed --concurrency 8
+
+# Benchmark Vespa (Target 3)
+python3 -m harness.orchestrator --engine vespa --seed-count 5000 --requests 2000 --skip-seed --concurrency 8
 ```
 
 #### 4. Run Unit & Contract Tests
@@ -88,9 +89,10 @@ make test-unit
 │       └── v1/
 │           └── feature_store.proto # ConnectRPC schema (768-dim vectors + metadata)
 ├── solution/
-│   ├── proxy/                      # Go L7 h2c reverse proxy shim, Dockerfile & tests
+│   ├── proxy/                      # Go L7 h2c proxy (proxy.go, qdrant.go, vespa.go), Dockerfile & tests
 │   └── engine_adapters/
-│       └── pgvector/               # Target 1 DDL & HNSW cosine index configuration
+│       ├── pgvector/               # Target 1 DDL & HNSW cosine index configuration
+│       └── vespa/                  # Target 3 application package (services.xml & item.sd schema)
 ├── harness/
 │   ├── orchestrator.py             # Sequential container lifecycle & cache purger
 │   ├── traffic_agent.py            # High-throughput AsyncIO synthetic load generator
@@ -102,7 +104,7 @@ make test-unit
 ├── tests/
 │   ├── unit/                       # Telemetry parsing, Chaos & Temporal Saga unit tests
 │   └── integration/                # End-to-end container benchmark passes
-├── docker-compose.yaml             # Single-target engine, proxy & Prometheus definitions
+├── docker-compose.yaml             # Engine targets, proxy & Prometheus definitions
 ├── prometheus.yaml                 # 1s scrape config with sub-millisecond histogram buckets
 └── Makefile                        # Build, lifecycle, and benchmark automation targets
 ```

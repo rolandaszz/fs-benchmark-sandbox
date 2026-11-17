@@ -67,10 +67,13 @@ class BenchmarkOrchestrator:
         if verdict.action == MitigationAction.THROTTLE_CONCURRENCY:
             self.traffic_agent.throttle(0.5)
         elif verdict.action in {MitigationAction.TRIGGER_TEMPORAL_SAGA, MitigationAction.ABORT_ENGINE_RUN}:
+            fallback_engine = "qdrant" if self.engine == "pgvector" else "pgvector"
+            if self.engine == "vespa":
+                fallback_engine = "qdrant"
             saga_outcome = await execute_mitigation_saga(
                 SagaInput(
                     target_engine=self.engine,
-                    fallback_engine="pgvector",
+                    fallback_engine=fallback_engine,
                     p99_latency_ms=snapshot.p99_latency_ms,
                 )
             )
@@ -86,7 +89,7 @@ class BenchmarkOrchestrator:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run single-target VFS benchmark lifecycle.")
-    parser.add_argument("--engine", default="pgvector", choices=["pgvector"])
+    parser.add_argument("--engine", default="pgvector", choices=["pgvector", "qdrant", "vespa"])
     parser.add_argument("--seed-count", type=int, default=200)
     parser.add_argument("--requests", type=int, default=200)
     parser.add_argument("--concurrency", type=int, default=8)

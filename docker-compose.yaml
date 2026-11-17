@@ -48,6 +48,67 @@ services:
     networks:
       - vfs_bench_net
 
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    container_name: vfs-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    cpus: 4.0
+    mem_limit: 4g
+    memswap_limit: 4g
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 4G
+        reservations:
+          cpus: "1.0"
+          memory: 1G
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 5s
+    networks:
+      - vfs_bench_net
+
+  vespa:
+    image: vespaengine/vespa-generic-intel-x86_64:latest
+    container_name: vfs-vespa
+    hostname: vespa
+    restart: unless-stopped
+    profiles:
+      - vespa
+    ports:
+      - "8081:8080"
+      - "19071:19071"
+    cpus: 4.0
+    mem_limit: 4g
+    memswap_limit: 4g
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 4G
+        reservations:
+          cpus: "1.0"
+          memory: 1G
+    volumes:
+      - vespa_data:/opt/vespa/var
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:19071/state/v1/health || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 25
+      start_period: 10s
+    networks:
+      - vfs_bench_net
+
   proxy:
     build:
       context: .
@@ -61,6 +122,10 @@ services:
       PROXY_LISTEN_ADDR: ":8080"
       DEFAULT_TARGET_ENGINE: "pgvector"
       PGVECTOR_DSN: "postgres://${POSTGRES_USER:-pguser}:${POSTGRES_PASSWORD:-pgpassword}@pgvector:5432/${POSTGRES_DB:-vfs_benchmark}?sslmode=disable"
+      QDRANT_URL: "http://qdrant:6333"
+      QDRANT_GRPC_URL: "http://qdrant:6334"
+      VESPA_URL: "http://vespa:8080"
+      VESPA_CONFIG_URL: "http://vespa:19071"
     cpus: 2.0
     mem_limit: 512m
     deploy:
@@ -70,6 +135,8 @@ services:
           memory: 512M
     depends_on:
       pgvector:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/healthz || exit 1"]
@@ -142,4 +209,6 @@ networks:
 
 volumes:
   pgvector_data:
+  qdrant_data:
+  vespa_data:
   prometheus_data:

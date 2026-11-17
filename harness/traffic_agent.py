@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import math
 import random
 import time
@@ -16,6 +17,7 @@ CATEGORIES = ("women_shoes", "vintage_jackets", "mens_knitwear", "kids_outerwear
 COUNTRIES = ("FR", "ES", "LT", "DE", "PL", "IT")
 
 
+@functools.lru_cache(maxsize=8192)
 def deterministic_unit_vector(seed: int, dim: int = EMBEDDING_DIM) -> list[float]:
     """Generate a deterministic L2-normalized 768-d float vector."""
     rng = random.Random(seed)
@@ -104,7 +106,7 @@ class TrafficAgent:
                             resp = await client.post(
                                 "/vfs.v1.FeatureStoreService/SearchSimilarItems",
                                 json={
-                                    "queryEmbedding": deterministic_unit_vector(req_idx),
+                                    "queryEmbedding": deterministic_unit_vector(req_idx % 256),
                                     "topK": 10,
                                     "maxPriceEur": 50.0,
                                     "sellerCountries": ["FR", "ES"],
@@ -119,7 +121,7 @@ class TrafficAgent:
                                     "items": [
                                         {
                                             "itemId": f"item-{item_idx:06d}",
-                                            "embedding": deterministic_unit_vector(req_idx + 10_000),
+                                            "embedding": deterministic_unit_vector((req_idx % 256) + 10_000),
                                             "brandId": f"brand-{item_idx % 40:03d}",
                                             "category": CATEGORIES[item_idx % len(CATEGORIES)],
                                             "priceEur": round(8.0 + (req_idx % 40), 2),

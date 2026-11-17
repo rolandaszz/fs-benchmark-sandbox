@@ -1,0 +1,55 @@
+schema item {
+  document item {
+    field item_id type string {
+      indexing: summary | attribute
+      attribute: fast-search
+    }
+    field embedding type tensor<float>(x[768]) {
+      indexing: attribute | index
+      attribute {
+        distance-metric: prenormalized-angular
+      }
+      index {
+        hnsw {
+          max-links-per-node: 16
+          neighbors-to-explore-at-insert: 64
+        }
+      }
+    }
+    field brand_id type string {
+      indexing: summary | attribute
+    }
+    field category type string {
+      indexing: summary | attribute
+    }
+    field price_eur type float {
+      indexing: summary | attribute
+      attribute: fast-search
+    }
+    field seller_country type string {
+      indexing: summary | attribute
+      attribute: fast-search
+    }
+    field updated_at_unix_ms type long {
+      indexing: summary | attribute
+    }
+  }
+
+  document-summary metadata_only {
+    summary item_id {}
+    summary brand_id {}
+    summary category {}
+    summary price_eur {}
+    summary seller_country {}
+    summary updated_at_unix_ms {}
+  }
+
+  rank-profile similarity inherits default {
+    inputs {
+      query(q_emb) tensor<float>(x[768])
+    }
+    first-phase {
+      expression: 1.0 - distance(field, embedding)
+    }
+  }
+}

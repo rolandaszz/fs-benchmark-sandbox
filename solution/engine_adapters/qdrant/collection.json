@@ -1,0 +1,25 @@
+{
+  "collection_name": "items",
+  "vectors": {
+    "size": 768,
+    "distance": "Cosine"
+  },
+  "hnsw_config": {
+    "m": 16,
+    "ef_construct": 64,
+    "full_scan_threshold": 100
+  },
+  "optimizer_config": {
+    "indexing_threshold": 100
+  },
+  "payload_indexes": [
+    {
+      "field_name": "seller_country",
+      "field_schema": "keyword"
+    },
+    {
+      "field_name": "price_eur",
+      "field_schema": "float"
+    }
+  ]
+}

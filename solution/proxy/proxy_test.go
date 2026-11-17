@@ -17,6 +17,8 @@ import (
 	vfsv1 "github.com/fs-benchmark/fs-benchmark-sandbox/gen/vfs/v1"
 	"github.com/fs-benchmark/fs-benchmark-sandbox/gen/vfs/v1/vfsv1connect"
 	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+	"google.golang.org/protobuf/encoding/protowire"
 )
 
 type inMemoryBackend struct {
@@ -28,9 +30,9 @@ func newInMemoryBackend() *inMemoryBackend {
 	return &inMemoryBackend{items: make(map[string]*vfsv1.ItemFeatures)}
 }
 
-func (m *inMemoryBackend) Name() string                   { return "pgvector" }
-func (m *inMemoryBackend) Ping(_ context.Context) error   { return nil }
-func (m *inMemoryBackend) Close()                         {}
+func (m *inMemoryBackend) Name() string                 { return "pgvector" }
+func (m *inMemoryBackend) Ping(_ context.Context) error { return nil }
+func (m *inMemoryBackend) Close()                       {}
 
 func (m *inMemoryBackend) GetItem(_ context.Context, itemID string) (*vfsv1.ItemFeatures, bool, error) {
 	m.mu.RLock()
@@ -235,5 +237,206 @@ func TestConnectRPCProxyH2CRoutingAndTelemetry(t *testing.T) {
 	}
 	if strings.Contains(metricsText, "untrusted-engine-header-999") {
 		t.Fatalf("untrusted engine header leaked into Prometheus metrics:\n%s", metricsText)
+	}
+}
+
+func TestLivezEndpoint(t *testing.T) {
+	backend := newInMemoryBackend()
+	telemetry := NewProxyTelemetry("pgvector")
+	proxy := NewFeatureStoreProxy("pgvector", map[string]EngineBackend{"pgvector": backend}, telemetry)
+
+	srv := httptest.NewServer(NewProxyHTTPHandler(proxy))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/livez")
+	if err != nil {
+		t.Fatalf("GET /livez failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from /livez, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /livez body failed: %v", err)
+	}
+	if !strings.Contains(string(body), `"alive"`) {
+		t.Fatalf("unexpected /livez response body: %s", string(body))
+	}
+}
+
+func TestItemIDToUUID(t *testing.T) {
+	id1 := "item-000001"
+	u1 := itemIDToUUID(id1)
+	u2 := itemIDToUUID(id1)
+	if u1 != u2 {
+		t.Fatalf("itemIDToUUID is not deterministic: %s != %s", u1, u2)
+	}
+	if len(u1) != 36 {
+		t.Fatalf("expected 36 characters, got %d (%s)", len(u1), u1)
+	}
+	// Verify UUID format xxxxxxxx-xxxx-5xxx-yxxx-xxxxxxxxxxxx
+	if u1[8] != '-' || u1[13] != '-' || u1[18] != '-' || u1[23] != '-' {
+		t.Fatalf("malformed UUID hyphen layout: %s", u1)
+	}
+	if u1[14] != '5' {
+		t.Fatalf("expected version 5 UUID, got char %c at index 14 (%s)", u1[14], u1)
+	}
+	idDifferent := "item-000002"
+	uDiff := itemIDToUUID(idDifferent)
+	if u1 == uDiff {
+		t.Fatalf("distinct item IDs produced identical UUID: %s", u1)
+	}
+}
+
+func TestQdrantBackendMock(t *testing.T) {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"title":"qdrant"}`))
+	})
+	mux.HandleFunc("/collections/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":{"status":"green"},"status":"ok"}`))
+	})
+
+	healthHandler := connect.NewUnaryHandler(
+		"/qdrant.Qdrant/HealthCheck",
+		func(ctx context.Context, req *connect.Request[rawBytes]) (*connect.Response[rawBytes], error) {
+			res := rawBytes{}
+			return connect.NewResponse(&res), nil
+		},
+		connect.WithCodec(rawProtoCodec{}),
+	)
+	upsertHandler := connect.NewUnaryHandler(
+		"/qdrant.Points/Upsert",
+		func(ctx context.Context, req *connect.Request[rawBytes]) (*connect.Response[rawBytes], error) {
+			res := rawBytes{}
+			return connect.NewResponse(&res), nil
+		},
+		connect.WithCodec(rawProtoCodec{}),
+	)
+	getHandler := connect.NewUnaryHandler(
+		"/qdrant.Points/Get",
+		func(ctx context.Context, req *connect.Request[rawBytes]) (*connect.Response[rawBytes], error) {
+			testItem := &vfsv1.ItemFeatures{
+				ItemId:          "item-qd-001",
+				Embedding:       makeTestEmbedding(0.12),
+				BrandId:         "brand-01",
+				Category:        "jackets",
+				PriceEur:        45.0,
+				SellerCountry:   "FR",
+				UpdatedAtUnixMs: 1700000000000,
+			}
+			var pt []byte
+			var pid []byte
+			pid = appendStringField(pid, 2, itemIDToUUID(testItem.GetItemId()))
+			pt = appendBytesField(pt, 1, pid)
+			pt = appendPayloadEntry(pt, 2, "item_id", testItem.GetItemId())
+			pt = appendPayloadEntry(pt, 2, "brand_id", testItem.GetBrandId())
+			pt = appendPayloadEntry(pt, 2, "category", testItem.GetCategory())
+			pt = appendPayloadDouble(pt, 2, "price_eur", float64(testItem.GetPriceEur()))
+			pt = appendPayloadEntry(pt, 2, "seller_country", testItem.GetSellerCountry())
+			pt = appendPayloadInt(pt, 2, "updated_at_unix_ms", testItem.GetUpdatedAtUnixMs())
+
+			var vecMsg []byte
+			vecMsg = appendFloatSlice(vecMsg, 1, testItem.GetEmbedding())
+			var vo []byte
+			vo = appendBytesField(vo, 1, vecMsg)
+			pt = appendBytesField(pt, 4, vo)
+
+			var getResp []byte
+			getResp = appendBytesField(getResp, 1, pt)
+			res := rawBytes(getResp)
+			return connect.NewResponse(&res), nil
+		},
+		connect.WithCodec(rawProtoCodec{}),
+	)
+	searchHandler := connect.NewUnaryHandler(
+		"/qdrant.Points/Search",
+		func(ctx context.Context, req *connect.Request[rawBytes]) (*connect.Response[rawBytes], error) {
+			testItem := &vfsv1.ItemFeatures{
+				ItemId:          "item-qd-001",
+				BrandId:         "brand-01",
+				Category:        "jackets",
+				PriceEur:        45.0,
+				SellerCountry:   "FR",
+				UpdatedAtUnixMs: 1700000000000,
+			}
+			var hit []byte
+			hit = appendPayloadEntry(hit, 2, "item_id", testItem.GetItemId())
+			hit = appendPayloadEntry(hit, 2, "brand_id", testItem.GetBrandId())
+			hit = appendPayloadEntry(hit, 2, "category", testItem.GetCategory())
+			hit = appendPayloadDouble(hit, 2, "price_eur", float64(testItem.GetPriceEur()))
+			hit = appendPayloadEntry(hit, 2, "seller_country", testItem.GetSellerCountry())
+			hit = appendPayloadInt(hit, 2, "updated_at_unix_ms", testItem.GetUpdatedAtUnixMs())
+			hit = protowire.AppendTag(hit, 3, protowire.Fixed32Type)
+			hit = protowire.AppendFixed32(hit, math.Float32bits(0.95))
+
+			var searchResp []byte
+			searchResp = appendBytesField(searchResp, 1, hit)
+			res := rawBytes(searchResp)
+			return connect.NewResponse(&res), nil
+		},
+		connect.WithCodec(rawProtoCodec{}),
+	)
+
+	mux.Handle("/qdrant.Qdrant/HealthCheck", healthHandler)
+	mux.Handle("/qdrant.Points/Upsert", upsertHandler)
+	mux.Handle("/qdrant.Points/Get", getHandler)
+	mux.Handle("/qdrant.Points/Search", searchHandler)
+
+	h2s := &http2.Server{}
+	mockQdrant := httptest.NewServer(h2c.NewHandler(mux, h2s))
+	defer mockQdrant.Close()
+
+	ctx := context.Background()
+	backend, err := NewQdrantBackend(ctx, mockQdrant.URL, mockQdrant.URL, "items")
+	if err != nil {
+		t.Fatalf("NewQdrantBackend failed: %v", err)
+	}
+	defer backend.Close()
+
+	if backend.Name() != "qdrant" {
+		t.Fatalf("expected Name() == 'qdrant', got %s", backend.Name())
+	}
+	if err := backend.Ping(ctx); err != nil {
+		t.Fatalf("backend.Ping failed: %v", err)
+	}
+
+	testItem := &vfsv1.ItemFeatures{
+		ItemId:          "item-qd-001",
+		Embedding:       makeTestEmbedding(0.12),
+		BrandId:         "brand-01",
+		Category:        "jackets",
+		PriceEur:        45.0,
+		SellerCountry:   "FR",
+		UpdatedAtUnixMs: 1700000000000,
+	}
+
+	upserted, err := backend.UpsertItems(ctx, []*vfsv1.ItemFeatures{testItem})
+	if err != nil {
+		t.Fatalf("UpsertItems failed: %v", err)
+	}
+	if upserted != 1 {
+		t.Fatalf("expected upserted count 1, got %d", upserted)
+	}
+
+	got, found, err := backend.GetItem(ctx, "item-qd-001")
+	if err != nil {
+		t.Fatalf("GetItem failed: %v", err)
+	}
+	if !found || got.GetItemId() != "item-qd-001" {
+		t.Fatalf("GetItem failed to retrieve item, found=%v, item=%v", found, got)
+	}
+
+	hits, err := backend.SearchSimilar(ctx, makeTestEmbedding(0.12), 10, 50.0, []string{"FR"})
+	if err != nil {
+		t.Fatalf("SearchSimilar failed: %v", err)
+	}
+	if len(hits) != 1 || hits[0].GetItem().GetItemId() != "item-qd-001" {
+		t.Fatalf("unexpected SearchSimilar hits: %v", hits)
 	}
 }

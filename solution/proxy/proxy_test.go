@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"io"
 	"math"
 	"net"
@@ -18,6 +17,8 @@ import (
 	vfsv1 "github.com/fs-benchmark/fs-benchmark-sandbox/gen/vfs/v1"
 	"github.com/fs-benchmark/fs-benchmark-sandbox/gen/vfs/v1/vfsv1connect"
 	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+	"google.golang.org/protobuf/encoding/protowire"
 )
 
 type inMemoryBackend struct {
@@ -290,86 +291,109 @@ func TestItemIDToUUID(t *testing.T) {
 }
 
 func TestQdrantBackendMock(t *testing.T) {
-	mockItems := make(map[string]qdrantPoint)
-	var mu sync.Mutex
+	mux := http.NewServeMux()
 
-	mockQdrant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"title":"qdrant"}`))
+	})
+	mux.HandleFunc("/collections/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":{"status":"green"},"status":"ok"}`))
+	})
 
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/readyz":
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"title":"qdrant - vector search engine"}`))
+	healthHandler := connect.NewUnaryHandler(
+		"/qdrant.Qdrant/HealthCheck",
+		func(ctx context.Context, req *connect.Request[rawBytes]) (*connect.Response[rawBytes], error) {
+			res := rawBytes{}
+			return connect.NewResponse(&res), nil
+		},
+		connect.WithCodec(rawProtoCodec{}),
+	)
+	upsertHandler := connect.NewUnaryHandler(
+		"/qdrant.Points/Upsert",
+		func(ctx context.Context, req *connect.Request[rawBytes]) (*connect.Response[rawBytes], error) {
+			res := rawBytes{}
+			return connect.NewResponse(&res), nil
+		},
+		connect.WithCodec(rawProtoCodec{}),
+	)
+	getHandler := connect.NewUnaryHandler(
+		"/qdrant.Points/Get",
+		func(ctx context.Context, req *connect.Request[rawBytes]) (*connect.Response[rawBytes], error) {
+			testItem := &vfsv1.ItemFeatures{
+				ItemId:          "item-qd-001",
+				Embedding:       makeTestEmbedding(0.12),
+				BrandId:         "brand-01",
+				Category:        "jackets",
+				PriceEur:        45.0,
+				SellerCountry:   "FR",
+				UpdatedAtUnixMs: 1700000000000,
+			}
+			var pt []byte
+			var pid []byte
+			pid = appendStringField(pid, 2, itemIDToUUID(testItem.GetItemId()))
+			pt = appendBytesField(pt, 1, pid)
+			pt = appendPayloadEntry(pt, 2, "item_id", testItem.GetItemId())
+			pt = appendPayloadEntry(pt, 2, "brand_id", testItem.GetBrandId())
+			pt = appendPayloadEntry(pt, 2, "category", testItem.GetCategory())
+			pt = appendPayloadDouble(pt, 2, "price_eur", float64(testItem.GetPriceEur()))
+			pt = appendPayloadEntry(pt, 2, "seller_country", testItem.GetSellerCountry())
+			pt = appendPayloadInt(pt, 2, "updated_at_unix_ms", testItem.GetUpdatedAtUnixMs())
 
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/collections/"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"result":{"status":"green"},"status":"ok"}`))
+			var vecMsg []byte
+			vecMsg = appendFloatSlice(vecMsg, 1, testItem.GetEmbedding())
+			var vo []byte
+			vo = appendBytesField(vo, 1, vecMsg)
+			pt = appendBytesField(pt, 4, vo)
 
-		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/index"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"status":"ok"}`))
+			var getResp []byte
+			getResp = appendBytesField(getResp, 1, pt)
+			res := rawBytes(getResp)
+			return connect.NewResponse(&res), nil
+		},
+		connect.WithCodec(rawProtoCodec{}),
+	)
+	searchHandler := connect.NewUnaryHandler(
+		"/qdrant.Points/Search",
+		func(ctx context.Context, req *connect.Request[rawBytes]) (*connect.Response[rawBytes], error) {
+			testItem := &vfsv1.ItemFeatures{
+				ItemId:          "item-qd-001",
+				BrandId:         "brand-01",
+				Category:        "jackets",
+				PriceEur:        45.0,
+				SellerCountry:   "FR",
+				UpdatedAtUnixMs: 1700000000000,
+			}
+			var hit []byte
+			hit = appendPayloadEntry(hit, 2, "item_id", testItem.GetItemId())
+			hit = appendPayloadEntry(hit, 2, "brand_id", testItem.GetBrandId())
+			hit = appendPayloadEntry(hit, 2, "category", testItem.GetCategory())
+			hit = appendPayloadDouble(hit, 2, "price_eur", float64(testItem.GetPriceEur()))
+			hit = appendPayloadEntry(hit, 2, "seller_country", testItem.GetSellerCountry())
+			hit = appendPayloadInt(hit, 2, "updated_at_unix_ms", testItem.GetUpdatedAtUnixMs())
+			hit = protowire.AppendTag(hit, 3, protowire.Fixed32Type)
+			hit = protowire.AppendFixed32(hit, math.Float32bits(0.95))
 
-		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/points"):
-			var payload struct {
-				Points []qdrantPoint `json:"points"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			for _, p := range payload.Points {
-				mockItems[p.Payload.ItemID] = p
-			}
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"status":"ok"}`))
+			var searchResp []byte
+			searchResp = appendBytesField(searchResp, 1, hit)
+			res := rawBytes(searchResp)
+			return connect.NewResponse(&res), nil
+		},
+		connect.WithCodec(rawProtoCodec{}),
+	)
 
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/points/search"):
-			var searchReq struct {
-				Vector []float32 `json:"vector"`
-				Limit  uint32    `json:"limit"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&searchReq)
-			var hits []qdrantPoint
-			for _, p := range mockItems {
-				p.Score = 0.95
-				hits = append(hits, p)
-			}
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"result": hits,
-				"status": "ok",
-			})
+	mux.Handle("/qdrant.Qdrant/HealthCheck", healthHandler)
+	mux.Handle("/qdrant.Points/Upsert", upsertHandler)
+	mux.Handle("/qdrant.Points/Get", getHandler)
+	mux.Handle("/qdrant.Points/Search", searchHandler)
 
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/points"):
-			var getReq struct {
-				IDs []string `json:"ids"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&getReq)
-			wanted := make(map[string]bool)
-			for _, id := range getReq.IDs {
-				wanted[id] = true
-			}
-			var result []qdrantPoint
-			for _, p := range mockItems {
-				if wanted[p.ID] {
-					result = append(result, p)
-				}
-			}
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"result": result,
-				"status": "ok",
-			})
-
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
+	h2s := &http2.Server{}
+	mockQdrant := httptest.NewServer(h2c.NewHandler(mux, h2s))
 	defer mockQdrant.Close()
 
 	ctx := context.Background()
-	backend, err := NewQdrantBackend(ctx, mockQdrant.URL, "items")
+	backend, err := NewQdrantBackend(ctx, mockQdrant.URL, mockQdrant.URL, "items")
 	if err != nil {
 		t.Fatalf("NewQdrantBackend failed: %v", err)
 	}

@@ -91,6 +91,7 @@ services:
       DEFAULT_TARGET_ENGINE: "pgvector"
       PGVECTOR_DSN: "postgres://${POSTGRES_USER:-pguser}:${POSTGRES_PASSWORD:-pgpassword}@pgvector:5432/${POSTGRES_DB:-vfs_benchmark}?sslmode=disable"
       QDRANT_URL: "http://qdrant:6333"
+      QDRANT_GRPC_URL: "http://qdrant:6334"
     cpus: 2.0
     mem_limit: 512m
     deploy:

@@ -670,16 +670,17 @@ func main() {
 	}
 
 	qdrantURL := strings.TrimSpace(os.Getenv("QDRANT_URL"))
+	qdrantGRPCURL := strings.TrimSpace(os.Getenv("QDRANT_GRPC_URL"))
 	qdrantCollection := getenvDefault("QDRANT_COLLECTION", "items")
 	if qdrantURL != "" {
-		qdrantBackend, err := NewQdrantBackend(ctx, qdrantURL, qdrantCollection)
+		qdrantBackend, err := NewQdrantBackend(ctx, qdrantURL, qdrantGRPCURL, qdrantCollection)
 		if err != nil {
 			slog.Error("failed to initialize qdrant backend", "error", err)
 			os.Exit(1)
 		}
 		defer qdrantBackend.Close()
 		backends["qdrant"] = qdrantBackend
-		slog.Info("qdrant backend initialized", "url", qdrantURL, "collection", qdrantCollection)
+		slog.Info("qdrant backend initialized", "rest_url", qdrantURL, "grpc_url", qdrantGRPCURL, "collection", qdrantCollection)
 	}
 
 	telemetry := NewProxyTelemetry(defaultEngine)

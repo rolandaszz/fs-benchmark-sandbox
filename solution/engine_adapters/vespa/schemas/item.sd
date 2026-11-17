@@ -35,6 +35,15 @@ schema item {
     }
   }
 
+  document-summary metadata_only {
+    summary item_id {}
+    summary brand_id {}
+    summary category {}
+    summary price_eur {}
+    summary seller_country {}
+    summary updated_at_unix_ms {}
+  }
+
   rank-profile similarity inherits default {
     inputs {
       query(q_emb) tensor<float>(x[768])

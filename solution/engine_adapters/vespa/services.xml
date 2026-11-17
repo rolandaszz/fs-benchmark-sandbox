@@ -4,7 +4,7 @@
     <document-api />
     <search />
     <nodes>
-      <jvm options="-Xms256m -Xmx1536m" />
+      <jvm options="-Xms1536m -Xmx1536m -XX:+AlwaysPreTouch" />
       <node hostalias="node1" />
     </nodes>
   </container>
@@ -16,6 +16,19 @@
     <nodes>
       <node hostalias="node1" distribution-key="0" />
     </nodes>
+    <engine>
+      <proton>
+        <tuning>
+          <searchnode>
+            <requestthreads>
+              <search>16</search>
+              <persearch>2</persearch>
+              <summary>8</summary>
+            </requestthreads>
+          </searchnode>
+        </tuning>
+      </proton>
+    </engine>
     <tuning>
       <resource-limits>
         <disk>0.98</disk>

@@ -26,7 +26,7 @@ const (
     <document-api />
     <search />
     <nodes>
-      <jvm options="-Xms256m -Xmx1536m" />
+      <jvm options="-Xms1536m -Xmx1536m -XX:+AlwaysPreTouch" />
       <node hostalias="node1" />
     </nodes>
   </container>
@@ -38,6 +38,19 @@ const (
     <nodes>
       <node hostalias="node1" distribution-key="0" />
     </nodes>
+    <engine>
+      <proton>
+        <tuning>
+          <searchnode>
+            <requestthreads>
+              <search>16</search>
+              <persearch>2</persearch>
+              <summary>8</summary>
+            </requestthreads>
+          </searchnode>
+        </tuning>
+      </proton>
+    </engine>
     <tuning>
       <resource-limits>
         <disk>0.98</disk>
@@ -84,6 +97,15 @@ const (
     }
   }
 
+  document-summary metadata_only {
+    summary item_id {}
+    summary brand_id {}
+    summary category {}
+    summary price_eur {}
+    summary seller_country {}
+    summary updated_at_unix_ms {}
+  }
+
   rank-profile similarity inherits default {
     inputs {
       query(q_emb) tensor<float>(x[768])
@@ -121,6 +143,7 @@ func NewVespaBackend(ctx context.Context, baseURL, configURL, namespace, docType
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 100,
 		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  true, // Avoid gzip decompression overhead across local loopback
 	}
 	client := &http.Client{
 		Transport: tr,
@@ -156,7 +179,8 @@ func (b *VespaBackend) Ping(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("vespa health check returned %d", resp.StatusCode)
 	}
@@ -168,12 +192,6 @@ func (b *VespaBackend) Close() {
 }
 
 func (b *VespaBackend) ensureApplication(ctx context.Context) error {
-	// First check if application container is already healthy
-	if err := b.Ping(ctx); err == nil {
-		slog.Info("vespa application already active and healthy", "base_url", b.baseURL)
-		return nil
-	}
-
 	// Build in-memory application package ZIP
 	var zipBuf bytes.Buffer
 	zw := zip.NewWriter(&zipBuf)
@@ -199,7 +217,6 @@ func (b *VespaBackend) ensureApplication(ctx context.Context) error {
 	}
 
 	zipBytes := zipBuf.Bytes()
-
 	deployURL := fmt.Sprintf("%s/application/v2/tenant/default/prepareandactivate", b.configURL)
 	var lastDeployErr error
 	activated := false
@@ -220,13 +237,13 @@ func (b *VespaBackend) ensureApplication(ctx context.Context) error {
 
 		resp, err := b.client.Do(req)
 		if err == nil {
-			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				activated = true
 				slog.Info("vespa application prepared and activated successfully", "attempt", attempt)
 				break
 			}
-			body, _ := io.ReadAll(resp.Body)
 			lastDeployErr = fmt.Errorf("deploy status %d: %s", resp.StatusCode, string(body))
 		} else {
 			lastDeployErr = err
@@ -255,7 +272,7 @@ func (b *VespaBackend) ensureApplication(ctx context.Context) error {
 		time.Sleep(1 * time.Second)
 	}
 
-	return fmt.Errorf("vespa data container did not become healthy within 30s")
+	return fmt.Errorf("vespa data container did not become healthy within 90s")
 }
 
 type vespaGetResponse struct {
@@ -273,7 +290,7 @@ type vespaGetResponse struct {
 }
 
 func (b *VespaBackend) GetItem(ctx context.Context, itemID string) (*vfsv1.ItemFeatures, bool, error) {
-	docURL := fmt.Sprintf("%s/document/v1/%s/%s/docid/%s", b.baseURL, b.namespace, b.docType, url.PathEscape(itemID))
+	docURL := fmt.Sprintf("%s/document/v1/%s/%s/docid/%s?timeout=200ms", b.baseURL, b.namespace, b.docType, url.PathEscape(itemID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, docURL, nil)
 	if err != nil {
 		return nil, false, err
@@ -286,15 +303,21 @@ func (b *VespaBackend) GetItem(ctx context.Context, itemID string) (*vfsv1.ItemF
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, false, nil
 	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, false, fmt.Errorf("read get item response: %w", err)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
 		return nil, false, fmt.Errorf("get item status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var res vespaGetResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+	if err := json.Unmarshal(body, &res); err != nil {
 		return nil, false, fmt.Errorf("decode get item: %w", err)
 	}
 
@@ -333,32 +356,50 @@ func (b *VespaBackend) BatchGetItems(ctx context.Context, itemIDs []string) ([]*
 	return items, missing, nil
 }
 
+type vespaTensorValues struct {
+	Values []float32 `json:"values"`
+}
+
+type vespaUpsertFields struct {
+	ItemID          string            `json:"item_id"`
+	Embedding       vespaTensorValues `json:"embedding"`
+	BrandID         string            `json:"brand_id"`
+	Category        string            `json:"category"`
+	PriceEur        float32           `json:"price_eur"`
+	SellerCountry   string            `json:"seller_country"`
+	UpdatedAtUnixMs int64             `json:"updated_at_unix_ms"`
+}
+
+type vespaUpsertRequest struct {
+	Fields vespaUpsertFields `json:"fields"`
+}
+
 func (b *VespaBackend) upsertSingleItem(ctx context.Context, it *vfsv1.ItemFeatures, nowMs int64) error {
 	ts := it.GetUpdatedAtUnixMs()
 	if ts <= 0 {
 		ts = nowMs
 	}
 
-	payload := map[string]any{
-		"fields": map[string]any{
-			"item_id": it.GetItemId(),
-			"embedding": map[string]any{
-				"values": it.GetEmbedding(),
+	payload := vespaUpsertRequest{
+		Fields: vespaUpsertFields{
+			ItemID: it.GetItemId(),
+			Embedding: vespaTensorValues{
+				Values: it.GetEmbedding(),
 			},
-			"brand_id":           it.GetBrandId(),
-			"category":           it.GetCategory(),
-			"price_eur":          it.GetPriceEur(),
-			"seller_country":     it.GetSellerCountry(),
-			"updated_at_unix_ms": ts,
+			BrandID:         it.GetBrandId(),
+			Category:        it.GetCategory(),
+			PriceEur:        it.GetPriceEur(),
+			SellerCountry:   it.GetSellerCountry(),
+			UpdatedAtUnixMs: ts,
 		},
 	}
 
-	raw, err := json.Marshal(payload)
+	raw, err := json.Marshal(&payload)
 	if err != nil {
 		return fmt.Errorf("marshal item: %w", err)
 	}
 
-	docURL := fmt.Sprintf("%s/document/v1/%s/%s/docid/%s", b.baseURL, b.namespace, b.docType, url.PathEscape(it.GetItemId()))
+	docURL := fmt.Sprintf("%s/document/v1/%s/%s/docid/%s?timeout=200ms", b.baseURL, b.namespace, b.docType, url.PathEscape(it.GetItemId()))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, docURL, bytes.NewReader(raw))
 	if err != nil {
 		return err
@@ -375,6 +416,7 @@ func (b *VespaBackend) upsertSingleItem(ctx context.Context, it *vfsv1.ItemFeatu
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("upsert item status %d: %s", resp.StatusCode, string(body))
 	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
 }
 
@@ -395,10 +437,10 @@ func (b *VespaBackend) UpsertItems(ctx context.Context, items []*vfsv1.ItemFeatu
 	concurrency := 16
 	sem := make(chan struct{}, concurrency)
 	var (
-		wg      sync.WaitGroup
-		firstMu sync.Mutex
+		wg       sync.WaitGroup
+		firstMu  sync.Mutex
 		firstErr error
-		count   uint32
+		count    uint32
 	)
 
 	for _, it := range items {
@@ -432,6 +474,27 @@ func (b *VespaBackend) UpsertItems(ctx context.Context, items []*vfsv1.ItemFeatu
 		return count, firstErr
 	}
 	return count, nil
+}
+
+type vespaRankingFeatures struct {
+	QueryEmb []float32 `json:"query(q_emb)"`
+}
+
+type vespaRanking struct {
+	Profile  string               `json:"profile"`
+	Features vespaRankingFeatures `json:"features"`
+}
+
+type vespaPresentation struct {
+	Summary string `json:"summary"`
+}
+
+type vespaSearchRequest struct {
+	YQL          string            `json:"yql"`
+	Hits         uint32            `json:"hits"`
+	Timeout      string            `json:"timeout"`
+	Presentation vespaPresentation `json:"presentation"`
+	Ranking      vespaRanking      `json:"ranking"`
 }
 
 type vespaSearchResponse struct {
@@ -478,18 +541,22 @@ func (b *VespaBackend) SearchSimilar(
 	yql := fmt.Sprintf("select item_id, brand_id, category, price_eur, seller_country, updated_at_unix_ms from %s where %s",
 		b.docType, strings.Join(whereParts, " and "))
 
-	searchBody := map[string]any{
-		"yql":  yql,
-		"hits": topK,
-		"ranking": map[string]any{
-			"profile": "similarity",
-			"features": map[string]any{
-				"query(q_emb)": queryVec,
+	searchReq := vespaSearchRequest{
+		YQL:     yql,
+		Hits:    topK,
+		Timeout: "200ms",
+		Presentation: vespaPresentation{
+			Summary: "metadata_only",
+		},
+		Ranking: vespaRanking{
+			Profile: "similarity",
+			Features: vespaRankingFeatures{
+				QueryEmb: queryVec,
 			},
 		},
 	}
 
-	raw, err := json.Marshal(searchBody)
+	raw, err := json.Marshal(&searchReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal search req: %w", err)
 	}
@@ -507,13 +574,17 @@ func (b *VespaBackend) SearchSimilar(
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read search response body: %w", err)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("vespa search status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("vespa search status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var res vespaSearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+	if err := json.Unmarshal(body, &res); err != nil {
 		return nil, fmt.Errorf("decode search response: %w", err)
 	}
 

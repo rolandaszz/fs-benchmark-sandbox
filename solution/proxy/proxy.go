@@ -696,6 +696,19 @@ func main() {
 		slog.Info("vespa backend initialized", "url", vespaURL, "config_url", vespaConfigURL)
 	}
 
+	milvusURL := strings.TrimSpace(os.Getenv("MILVUS_URL"))
+	milvusCollection := getenvDefault("MILVUS_COLLECTION", "items")
+	if milvusURL != "" {
+		milvusBackend, err := NewMilvusBackend(ctx, milvusURL, milvusCollection)
+		if err != nil {
+			slog.Error("failed to initialize milvus backend", "error", err)
+			os.Exit(1)
+		}
+		defer milvusBackend.Close()
+		backends["milvus"] = milvusBackend
+		slog.Info("milvus backend initialized", "url", milvusURL, "collection", milvusCollection)
+	}
+
 	telemetry := NewProxyTelemetry(defaultEngine)
 	proxy := NewFeatureStoreProxy(defaultEngine, backends, telemetry)
 

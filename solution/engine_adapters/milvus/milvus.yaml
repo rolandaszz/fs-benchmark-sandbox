@@ -1,0 +1,18 @@
+etcd:
+  use:
+    embed: true
+  data:
+    dir: /var/lib/milvus/etcd
+
+common:
+  storageType: local
+
+localStorage:
+  path: /var/lib/milvus/data
+
+queryNode:
+  cache:
+    memoryLimit: 1073741824 # 1GB cache cap within 4GB container limit
+
+knowhere:
+  simdType: sse4_2 # Compatible with pre-AVX2 Intel CPUs (Sandy Bridge+)

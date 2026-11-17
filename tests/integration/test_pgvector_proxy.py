@@ -13,9 +13,19 @@ RUN_INTEGRATION = os.getenv("RUN_VFS_INTEGRATION", "0") == "1"
 
 
 @pytest.mark.skipif(not RUN_INTEGRATION, reason="Set RUN_VFS_INTEGRATION=1 with docker compose stack running")
-@pytest.mark.parametrize("engine", ["pgvector", "qdrant"])
+@pytest.mark.parametrize("engine", ["pgvector", "qdrant", "vespa"])
 @pytest.mark.asyncio
 async def test_end_to_end_engine_proxy_and_prometheus_scrape(engine: str) -> None:
+    if engine == "vespa":
+        async with httpx.AsyncClient(base_url="http://localhost:8080") as client:
+            resp = await client.post(
+                "/vfs.v1.FeatureStoreService/GetItemFeatures",
+                json={"itemId": "ping"},
+                headers={"X-Target-Engine": "vespa"},
+            )
+            if resp.status_code != 200 and ("unsupported target engine" in resp.text.lower() or "is inactive" in resp.text.lower()):
+                pytest.skip("Vespa backend is not active in proxy (requires AVX2-capable host CPU)")
+
     agent = TrafficAgent(proxy_url="http://localhost:8080", target_engine=engine, concurrency=8)
     seeded = await agent.seed_catalog(item_count=40, batch_size=20)
     assert seeded == 40

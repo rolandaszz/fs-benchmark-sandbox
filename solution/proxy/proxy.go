@@ -683,6 +683,19 @@ func main() {
 		slog.Info("qdrant backend initialized", "rest_url", qdrantURL, "grpc_url", qdrantGRPCURL, "collection", qdrantCollection)
 	}
 
+	vespaURL := strings.TrimSpace(os.Getenv("VESPA_URL"))
+	vespaConfigURL := getenvDefault("VESPA_CONFIG_URL", "http://localhost:19071")
+	if vespaURL != "" {
+		vespaBackend, err := NewVespaBackend(ctx, vespaURL, vespaConfigURL, "vfs", "item")
+		if err != nil {
+			slog.Error("failed to initialize vespa backend", "error", err)
+			os.Exit(1)
+		}
+		defer vespaBackend.Close()
+		backends["vespa"] = vespaBackend
+		slog.Info("vespa backend initialized", "url", vespaURL, "config_url", vespaConfigURL)
+	}
+
 	telemetry := NewProxyTelemetry(defaultEngine)
 	proxy := NewFeatureStoreProxy(defaultEngine, backends, telemetry)
 

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<services version="1.0">
+  <container id="default" version="1.0">
+    <document-api />
+    <search />
+    <nodes>
+      <jvm options="-Xms256m -Xmx1536m" />
+      <node hostalias="node1" />
+    </nodes>
+  </container>
+  <content id="items" version="1.0">
+    <redundancy>1</redundancy>
+    <documents>
+      <document type="item" mode="index" />
+    </documents>
+    <nodes>
+      <node hostalias="node1" distribution-key="0" />
+    </nodes>
+    <tuning>
+      <resource-limits>
+        <disk>0.98</disk>
+        <memory>0.95</memory>
+      </resource-limits>
+    </tuning>
+  </content>
+</services>

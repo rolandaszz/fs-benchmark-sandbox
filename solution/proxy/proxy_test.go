@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"io"
 	"math"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	vfsv1 "github.com/fs-benchmark/fs-benchmark-sandbox/gen/vfs/v1"
@@ -438,5 +440,161 @@ func TestQdrantBackendMock(t *testing.T) {
 	}
 	if len(hits) != 1 || hits[0].GetItem().GetItemId() != "item-qd-001" {
 		t.Fatalf("unexpected SearchSimilar hits: %v", hits)
+	}
+}
+
+func TestVespaBackendMock(t *testing.T) {
+	type vespaDocFields struct {
+		ItemID          string  `json:"item_id"`
+		BrandID         string  `json:"brand_id"`
+		Category        string  `json:"category"`
+		PriceEur        float32 `json:"price_eur"`
+		SellerCountry   string  `json:"seller_country"`
+		UpdatedAtUnixMs int64   `json:"updated_at_unix_ms"`
+		Embedding       struct {
+			Values []float32 `json:"values"`
+		} `json:"embedding"`
+	}
+
+	docs := make(map[string]vespaDocFields)
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Health endpoint
+		if r.URL.Path == "/state/v1/health" {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": map[string]string{"code": "up"}})
+			return
+		}
+
+		// Config server deploy endpoint
+		if strings.Contains(r.URL.Path, "/prepareandactivate") {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "activated"})
+			return
+		}
+
+		// Document API: /document/v1/vfs/item/docid/{id}
+		if strings.HasPrefix(r.URL.Path, "/document/v1/vfs/item/docid/") {
+			id := strings.TrimPrefix(r.URL.Path, "/document/v1/vfs/item/docid/")
+			switch r.Method {
+			case http.MethodGet:
+				doc, exists := docs[id]
+				if !exists {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"fields": doc,
+				})
+				return
+			case http.MethodPost:
+				var body struct {
+					Fields vespaDocFields `json:"fields"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				docs[id] = body.Fields
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
+				return
+			}
+		}
+
+		// Search API: /search/
+		if r.URL.Path == "/search/" && r.Method == http.MethodPost {
+			var children []map[string]any
+			for _, doc := range docs {
+				children = append(children, map[string]any{
+					"relevance": 0.98,
+					"fields": map[string]any{
+						"item_id":             doc.ItemID,
+						"brand_id":            doc.BrandID,
+						"category":            doc.Category,
+						"price_eur":           doc.PriceEur,
+						"seller_country":      doc.SellerCountry,
+						"updated_at_unix_ms":  doc.UpdatedAtUnixMs,
+					},
+				})
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"root": map[string]any{
+					"children": children,
+				},
+			})
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	backend, err := NewVespaBackend(ctx, server.URL, server.URL, "vfs", "item")
+	if err != nil {
+		t.Fatalf("failed to create VespaBackend: %v", err)
+	}
+	defer backend.Close()
+
+	if backend.Name() != "vespa" {
+		t.Fatalf("expected backend name 'vespa', got %q", backend.Name())
+	}
+
+	if err := backend.Ping(ctx); err != nil {
+		t.Fatalf("Ping failed: %v", err)
+	}
+
+	testItem := &vfsv1.ItemFeatures{
+		ItemId:          "item-vp-001",
+		Embedding:       makeTestEmbedding(0.42),
+		BrandId:         "brand-42",
+		Category:        "shoes",
+		PriceEur:        39.99,
+		SellerCountry:   "FR",
+		UpdatedAtUnixMs: 1700000000000,
+	}
+
+	upserted, err := backend.UpsertItems(ctx, []*vfsv1.ItemFeatures{testItem})
+	if err != nil {
+		t.Fatalf("UpsertItems failed: %v", err)
+	}
+	if upserted != 1 {
+		t.Fatalf("expected upserted 1, got %d", upserted)
+	}
+
+	got, found, err := backend.GetItem(ctx, "item-vp-001")
+	if err != nil {
+		t.Fatalf("GetItem failed: %v", err)
+	}
+	if !found || got.GetItemId() != "item-vp-001" {
+		t.Fatalf("GetItem failed, found=%v, item=%v", found, got)
+	}
+
+	items, missing, err := backend.BatchGetItems(ctx, []string{"item-vp-001", "missing-doc"})
+	if err != nil {
+		t.Fatalf("BatchGetItems failed: %v", err)
+	}
+	if len(items) != 1 || len(missing) != 1 {
+		t.Fatalf("unexpected BatchGetItems result: items=%d, missing=%d", len(items), len(missing))
+	}
+
+	hits, err := backend.SearchSimilar(ctx, makeTestEmbedding(0.42), 10, 50.0, []string{"FR"})
+	if err != nil {
+		t.Fatalf("SearchSimilar failed: %v", err)
+	}
+	if len(hits) != 1 || hits[0].GetItem().GetItemId() != "item-vp-001" {
+		t.Fatalf("unexpected SearchSimilar hits: %v", hits)
+	}
+	if hits[0].GetCosineSimilarity() != 0.98 {
+		t.Fatalf("expected CosineSimilarity 0.98, got %f", hits[0].GetCosineSimilarity())
 	}
 }

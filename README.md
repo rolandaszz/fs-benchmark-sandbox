@@ -40,7 +40,7 @@ To maintain strict benchmarking validity on a developer workstation without sacr
 * Docker & Docker Compose v2 (`cgroups v2` enabled)
 * Python 3.12+ and Go 1.23+ (`Makefile` automatically falls back to a containerized Go 1.23 toolchain if `go`/`protoc` are not installed on the host)
 
-#### 1. Start Infrastructure (`pgvector`, `Qdrant`, `Vespa`, `proxy` & `prometheus`)
+#### 1. Start Infrastructure (`pgvector`, `Qdrant`, `Vespa`, `Milvus`, `proxy` & `prometheus`)
 ```bash
 # Build and launch database engines, ConnectRPC proxy (:8080), and Prometheus (:9090)
 make up
@@ -68,6 +68,12 @@ python3 -m harness.orchestrator --engine vespa --seed-count 5000 --requests 2000
 
 # Benchmark Milvus (Target 4)
 python3 -m harness.orchestrator --engine milvus --seed-count 5000 --requests 2000 --skip-seed --concurrency 8
+
+# Run Full Multi-Engine Suite & Generate Executive Markdown Report (Phase 5)
+python3 -m harness.orchestrator --all-engines --seed-count 5000 --requests 1000 --skip-seed --concurrency 8 --report-out docs/benchmark_report.md
+
+# Run Fault-Injection Chaos Drill (45ms netem delay triggering Temporal LIFO Saga failover)
+python3 -m harness.orchestrator --engine milvus --seed-count 5000 --requests 400 --skip-seed --concurrency 8 --chaos-delay-ms 45
 ```
 
 #### 4. Run Unit & Contract Tests
@@ -102,7 +108,10 @@ make test-unit
 │   ├── traffic_agent.py            # High-throughput AsyncIO synthetic load generator
 │   ├── chaos_agent.py              # Linux tc netem & cgroup controller
 │   ├── sre_evaluator.py            # OpenAI Decisions API triage client
+│   ├── report_generator.py         # Executive Markdown & JSON benchmark matrix synthesizer
 │   └── temporal_saga.py            # Durable LIFO mitigation workflow definitions
+├── docs/
+│   └── benchmark_report.md         # Synthesized 4-engine comparative evaluation report
 ├── deploy/
 │   └── k8s/                        # Declarative K8s Deployment, Service, ServiceMonitor & Kustomize
 ├── tests/

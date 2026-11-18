@@ -7,7 +7,8 @@ import asyncio
 import json
 from dataclasses import asdict, dataclass, field
 
-from harness.chaos_agent import ChaosAgent
+from harness.chaos_agent import ChaosAgent, NetemProfile
+from harness.report_generator import write_suite_artifacts
 from harness.sre_evaluator import DecisionVerdict, MitigationAction, SREEvaluator
 from harness.temporal_saga import SagaExecutionResult, SagaInput, execute_mitigation_saga
 from harness.traffic_agent import TrafficAgent, TrafficSummary
@@ -66,18 +67,30 @@ class BenchmarkOrchestrator:
         seed_count: int = 200,
         request_count: int = 200,
         skip_seed: bool = False,
+        chaos_delay_ms: int = 0,
     ) -> OrchestratorRunReport:
         self.chaos_agent.drop_os_page_cache()
         seeded = seed_count if skip_seed else await self.traffic_agent.seed_catalog(item_count=seed_count)
         if not skip_seed and seed_count > 0:
             # Give Prometheus sliding window buffer to isolate online traffic from bulk batches
             await asyncio.sleep(2)
-        traffic_summary = await self.traffic_agent.run_workload_mix(
-            total_requests=request_count,
-            catalog_size=seed_count,
-        )
 
-        snapshot = await self.evaluator.query_prometheus_snapshot(engine=self.engine)
+        if chaos_delay_ms > 0:
+            self.chaos_agent.apply_netem(NetemProfile(delay_ms=chaos_delay_ms, jitter_ms=max(1, chaos_delay_ms // 5)))
+
+        try:
+            traffic_summary = await self.traffic_agent.run_workload_mix(
+                total_requests=request_count,
+                catalog_size=seed_count,
+            )
+            snapshot = await self.evaluator.query_prometheus_snapshot(engine=self.engine)
+            if chaos_delay_ms > 0 and self.dry_run_chaos:
+                snapshot.p99_latency_ms += float(chaos_delay_ms)
+                snapshot.p95_latency_ms += float(chaos_delay_ms) * 0.8
+        finally:
+            if chaos_delay_ms > 0:
+                self.chaos_agent.clear_netem()
+
         verdict: DecisionVerdict = await self.evaluator.evaluate(snapshot)
 
         saga_outcome: SagaExecutionResult | None = None
@@ -110,7 +123,8 @@ class BenchmarkOrchestrator:
         seed_count: int = 200,
         request_count: int = 200,
         skip_seed: bool = False,
-        cooldown_seconds: float = 1.0,
+        cooldown_seconds: float = 2.0,
+        chaos_delay_ms: int = 0,
     ) -> MultiEngineSuiteReport:
         """Execute sequential benchmark runs across all target engines with page-cache isolation."""
         reports: list[OrchestratorRunReport] = []
@@ -126,6 +140,7 @@ class BenchmarkOrchestrator:
                 seed_count=seed_count,
                 request_count=request_count,
                 skip_seed=skip_seed,
+                chaos_delay_ms=chaos_delay_ms,
             )
             reports.append(report)
             if idx < len(engines) - 1 and cooldown_seconds > 0:
@@ -155,6 +170,9 @@ def main() -> None:
     parser.add_argument("--requests", type=int, default=200)
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--skip-seed", action="store_true", help="Skip re-seeding if catalog is already populated")
+    parser.add_argument("--chaos-delay-ms", type=int, default=0, help="Inject tc netem delay_ms fault during run")
+    parser.add_argument("--report-out", default="", help="Optional path to write Markdown synthesis report")
+    parser.add_argument("--json-out", default="", help="Optional path to write JSON suite report")
     args = parser.parse_args()
 
     orchestrator = BenchmarkOrchestrator(engine=args.engine, concurrency=args.concurrency)
@@ -164,8 +182,15 @@ def main() -> None:
                 seed_count=args.seed_count,
                 request_count=args.requests,
                 skip_seed=args.skip_seed,
+                chaos_delay_ms=args.chaos_delay_ms,
             )
         )
+        if args.report_out:
+            write_suite_artifacts(
+                suite_report,
+                markdown_path=args.report_out,
+                json_path=args.json_out or None,
+            )
         print(json.dumps(asdict(suite_report), indent=2))
     else:
         report = asyncio.run(
@@ -173,6 +198,7 @@ def main() -> None:
                 seed_count=args.seed_count,
                 request_count=args.requests,
                 skip_seed=args.skip_seed,
+                chaos_delay_ms=args.chaos_delay_ms,
             )
         )
         print(json.dumps(asdict(report), indent=2))

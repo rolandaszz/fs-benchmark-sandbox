@@ -40,6 +40,16 @@ spec:
                 secretKeyRef:
                   name: vfs-pgvector-credentials
                   key: dsn
+            - name: QDRANT_URL
+              value: "http://vfs-qdrant.vfs-system.svc.cluster.local:6333"
+            - name: QDRANT_GRPC_URL
+              value: "http://vfs-qdrant.vfs-system.svc.cluster.local:6334"
+            - name: VESPA_URL
+              value: "http://vfs-vespa.vfs-system.svc.cluster.local:8080"
+            - name: VESPA_CONFIG_URL
+              value: "http://vfs-vespa.vfs-system.svc.cluster.local:19071"
+            - name: MILVUS_URL
+              value: "http://vfs-milvus.vfs-system.svc.cluster.local:19530"
           resources:
             requests:
               cpu: "500m"

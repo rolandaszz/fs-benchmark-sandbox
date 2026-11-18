@@ -12,7 +12,7 @@ HAS_BUF           := $(shell command -v buf 2>/dev/null)
 HAS_PROTOC_GO     := $(shell command -v protoc-gen-go 2>/dev/null)
 HAS_PROTOC_CONN   := $(shell command -v protoc-gen-connect-go 2>/dev/null)
 
-.PHONY: help toolchain-image proto build up down test-unit test-go venv clean
+.PHONY: help toolchain-image proto build up down test-unit test-go benchmark-all venv clean
 
 help: ## Display available automation commands
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -84,6 +84,9 @@ venv: ## Sync local Python virtual environment from deterministic uv.lock
 
 test-unit: venv ## Execute Python unit tests in tests/unit/
 	$(VENV_DIR)/bin/python -m pytest -v
+
+benchmark-all: venv ## Run sequential multi-engine benchmark suite and generate docs/benchmark_report.{md,json}
+	$(VENV_DIR)/bin/python -m harness.orchestrator --all-engines --seed-count 5000 --requests 1000 --skip-seed --concurrency 8 --report-out docs/benchmark_report.md --json-out docs/benchmark_report.json
 
 clean: ## Purge Go binaries, test caches, and coverage artifacts idempotently
 	rm -rf bin/ coverage.out .pytest_cache .ruff_cache

@@ -24,13 +24,17 @@ class MitigationAction(StrEnum):
 
 
 class TelemetrySnapshot(BaseModel):
-    """Point-in-time golden signal snapshot sampled from Prometheus."""
+    """Point-in-time golden signal snapshot sampled from Prometheus and container cgroups."""
 
     engine: str
+    p50_latency_ms: float = Field(default=0.0, ge=0.0)
+    p95_latency_ms: float = Field(default=0.0, ge=0.0)
     p99_latency_ms: float = Field(ge=0.0)
     rps: float = Field(ge=0.0)
     error_rate: float = Field(ge=0.0, le=1.0)
     cpu_throttled_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    memory_usage_mb: float = Field(default=0.0, ge=0.0)
+    cpu_percent: float = Field(default=0.0, ge=0.0)
 
 
 class DecisionVerdict(BaseModel):
@@ -132,7 +136,13 @@ class SREEvaluator:
         self._external_client = http_client
 
     async def query_prometheus_snapshot(self, engine: str = "pgvector") -> TelemetrySnapshot:
-        """Query 30-second sliding p99 latency, RPS, and error ratio from Prometheus."""
+        """Query 30-second sliding p50/p95/p99 latency, RPS, and error ratio from Prometheus."""
+        p50_query = (
+            f'histogram_quantile(0.50, sum(rate(vfs_request_duration_seconds_bucket{{engine="{engine}"}}[30s])) by (le))'
+        )
+        p95_query = (
+            f'histogram_quantile(0.95, sum(rate(vfs_request_duration_seconds_bucket{{engine="{engine}"}}[30s])) by (le))'
+        )
         p99_query = (
             f'histogram_quantile(0.99, sum(rate(vfs_request_duration_seconds_bucket{{engine="{engine}"}}[30s])) by (le))'
         )
@@ -145,6 +155,8 @@ class SREEvaluator:
         owns_client = self._external_client is None
         client = self._external_client or httpx.AsyncClient(timeout=2.0)
         try:
+            p50_sec = await self._scalar_promql(client, p50_query)
+            p95_sec = await self._scalar_promql(client, p95_query)
             p99_sec = await self._scalar_promql(client, p99_query)
             rps = await self._scalar_promql(client, rps_query)
             err_rate = await self._scalar_promql(client, err_query)
@@ -154,6 +166,8 @@ class SREEvaluator:
 
         return TelemetrySnapshot(
             engine=engine,
+            p50_latency_ms=max(0.0, p50_sec * 1000.0),
+            p95_latency_ms=max(0.0, p95_sec * 1000.0),
             p99_latency_ms=max(0.0, p99_sec * 1000.0),
             rps=max(0.0, rps),
             error_rate=min(1.0, max(0.0, err_rate)),

@@ -40,6 +40,23 @@ def _validate_identifier(value: str, label: str) -> str:
     return value
 
 
+def _parse_memory_mib(raw: str) -> float:
+    """Parse Docker stats memory string (e.g. '412.5MiB / 4GiB' or '1.2GiB / 4GiB') into MiB."""
+    usage_part = raw.split("/")[0].strip()
+    match = re.match(r"^([0-9.]+)\s*([a-zA-Z]+)$", usage_part)
+    if not match:
+        return 0.0
+    val = float(match.group(1))
+    unit = match.group(2).lower()
+    if unit in {"gib", "gb", "g"}:
+        return val * 1024.0
+    if unit in {"mib", "mb", "m"}:
+        return val
+    if unit in {"kib", "kb", "k"}:
+        return val / 1024.0
+    return val
+
+
 class ChaosAgent:
     """Executes or dry-runs strictly bounded host chaos primitives without shell interpolation."""
 
@@ -112,3 +129,20 @@ class ChaosAgent:
             subprocess.run(["sync"], check=True)
             Path("/proc/sys/vm/drop_caches").write_text("3\n", encoding="utf-8")
         return action
+
+    def sample_container_resources(self, engine: str) -> tuple[float, float]:
+        """Sample live container (memory_mib, cpu_percent) via docker stats without shell interpolation."""
+        safe_eng = _validate_identifier(engine, "engine")
+        container_name = f"vfs-{safe_eng}"
+        cmd = ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}|{{.CPUPerc}}", container_name]
+        try:
+            res = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=3.0)
+            line = res.stdout.strip()
+            if "|" not in line:
+                return (0.0, 0.0)
+            mem_str, cpu_str = line.split("|", 1)
+            mem_mib = _parse_memory_mib(mem_str)
+            cpu_pct = float(cpu_str.strip().rstrip("%") or 0.0)
+            return (round(mem_mib, 2), round(cpu_pct, 2))
+        except (subprocess.SubprocessError, OSError, ValueError):
+            return (0.0, 0.0)

@@ -16,9 +16,12 @@ To maintain strict benchmarking validity on a developer workstation without sacr
 | **Serving Proxy** | L7 Edge Gateway | Network/Service mesh → **Go ConnectRPC binary (`h2c`)** routing via `X-Target-Engine` on `:8080` | `_` |
 | **Observability** | SLA Telemetry | Full Grafana/OTel stack → **Standalone Prometheus** (`1s` scrape of `vfs_request_duration_seconds`) | `_` |
 | **Chaos Agent** | Fault Injection | K8s Chaos Mesh daemonset → **Host Linux `tc netem` & `cgroups v2`** controlled from Python | `_` |
-| **SRE Evaluator** | Tail-Latency Triage | Inline generative LLM (1.5–4s lag) → **Out-of-band OpenAI Decisions API (`gpt-6-luna`)** (`predicate`, `choice`, `score`) | `_` |
-| **Workflow Engine** | Incident Mitigation | Multi-container Temporal cluster → **`temporalio` in-memory test server** (optional Docker profile) running LIFO Sagas | `_` |
+| **SRE Evaluator** | Tail-Latency Triage | Inline generative LLM (1.5–4s lag) → **Decisions API contract (`gpt-6-luna`)** with offline deterministic rule ladder fallback | `_` |
+| **Workflow Engine** | Incident Mitigation | Multi-container Temporal cluster → **`temporalio` in-memory test server** (LIFO Sagas triggered during fault/chaos drills) | `_` |
 | **Traffic Agent** | Load Generation | Distributed k6/Locust cluster → **Deterministic Python `asyncio` + `httpx[http2]` pool** (80% ANN, 15% write, 5% point lookup) | `_` |
+
+> [!NOTE]
+> **Triage & Control Plane Execution**: While the harness implements the production schema contract for the OpenAI Decisions API (`gpt-6-luna`) and Temporal LIFO Saga workflows, benchmark runs execute offline against the local deterministic rule ladder (`source: deterministic_fallback`) without external API dependencies. Live Decisions API calls are only made if `OPENAI_API_KEY` is provided, and Temporal Sagas are actuated during critical SLA breaches or active chaos injection drills.
 
 ---
 
@@ -30,6 +33,7 @@ To maintain strict benchmarking validity on a developer workstation without sacr
   * **15% Real-Time Ingestion:** Concurrent partial updates simulating stock adjustments and inventory status.
   * **5% Pure Scalar / Lexical Lookup:** Point retrieval by `item_id`.
 * **SLA Target:** Maintain **p99 latency < 25.0ms** under sustained high-concurrency QPS load and induced network/cgroup degradation.
+* **Host Hardware:** Ubuntu 24.04.5 LTS (Kernel 6.8.0), Intel Core i7-2600K (8 threads @ 3.8GHz), 16 GiB RAM.
 
 ---
 
@@ -40,7 +44,7 @@ To maintain strict benchmarking validity on a developer workstation without sacr
 * Docker & Docker Compose v2 (`cgroups v2` enabled)
 * Python 3.12+ and Go 1.23+ (`Makefile` automatically falls back to a containerized Go 1.23 toolchain if `go`/`protoc` are not installed on the host)
 
-#### 1. Start Infrastructure (`pgvector`, `Qdrant`, `Vespa`, `proxy` & `prometheus`)
+#### 1. Start Infrastructure (`pgvector`, `Qdrant`, `Vespa`, `Milvus`, `proxy` & `prometheus`)
 ```bash
 # Build and launch database engines, ConnectRPC proxy (:8080), and Prometheus (:9090)
 make up
@@ -68,6 +72,15 @@ python3 -m harness.orchestrator --engine vespa --seed-count 5000 --requests 2000
 
 # Benchmark Milvus (Target 4)
 python3 -m harness.orchestrator --engine milvus --seed-count 5000 --requests 2000 --skip-seed --concurrency 8
+
+# Run Full Multi-Engine Suite & Generate Markdown and JSON Reports (Phase 5)
+python3 -m harness.orchestrator --all-engines --seed-count 5000 --requests 1000 --skip-seed --concurrency 8 --report-out docs/benchmark_report.md --json-out docs/benchmark_report.json
+
+# Run Fault-Injection Chaos Drill (safe dry-run simulation triggering Temporal LIFO Saga failover)
+python3 -m harness.orchestrator --engine milvus --seed-count 5000 --requests 400 --skip-seed --concurrency 8 --chaos-delay-ms 45
+
+# Run Live Kernel-Level Chaos with sudo (executes real Linux tc netem delay on loopback & drops page-cache)
+sudo $(pwd)/.venv/bin/python -m harness.orchestrator --engine milvus --seed-count 5000 --requests 400 --skip-seed --concurrency 8 --chaos-delay-ms 45 --live-chaos
 ```
 
 #### 4. Run Unit & Contract Tests
@@ -102,7 +115,11 @@ make test-unit
 │   ├── traffic_agent.py            # High-throughput AsyncIO synthetic load generator
 │   ├── chaos_agent.py              # Linux tc netem & cgroup controller
 │   ├── sre_evaluator.py            # OpenAI Decisions API triage client
+│   ├── report_generator.py         # Markdown & JSON benchmark matrix synthesizer
 │   └── temporal_saga.py            # Durable LIFO mitigation workflow definitions
+├── docs/
+│   ├── benchmark_report.md         # Synthesized 4-engine comparative evaluation report
+│   └── benchmark_report.json       # Structured comparative telemetry & ranking payload
 ├── deploy/
 │   └── k8s/                        # Declarative K8s Deployment, Service, ServiceMonitor & Kustomize
 ├── tests/

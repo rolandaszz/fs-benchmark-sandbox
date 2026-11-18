@@ -1,0 +1,124 @@
+{
+  "runs": [
+    {
+      "engine": "pgvector",
+      "seeded_items": 5000,
+      "traffic": {
+        "total_requests": 1000,
+        "succeeded": 1000,
+        "failed": 0,
+        "elapsed_seconds": 3.48018773000058,
+        "achieved_rps": 287.3408211228402
+      },
+      "verdict": {
+        "is_sla_breached": false,
+        "action": "PROCEED",
+        "stability_score": 5,
+        "source": "deterministic_fallback"
+      },
+      "saga_result": null,
+      "telemetry": {
+        "engine": "pgvector",
+        "p50_latency_ms": 3.456937799043062,
+        "p95_latency_ms": 4.90311004784689,
+        "p99_latency_ms": 7.646666666666676,
+        "rps": 27.79310344827586,
+        "error_rate": 0.0,
+        "cpu_throttled_ratio": 0.0,
+        "memory_usage_mb": 138.9,
+        "cpu_percent": 0.13
+      }
+    },
+    {
+      "engine": "qdrant",
+      "seeded_items": 5000,
+      "traffic": {
+        "total_requests": 1000,
+        "succeeded": 1000,
+        "failed": 0,
+        "elapsed_seconds": 2.918748095999945,
+        "achieved_rps": 342.6126431981127
+      },
+      "verdict": {
+        "is_sla_breached": false,
+        "action": "PROCEED",
+        "stability_score": 5,
+        "source": "deterministic_fallback"
+      },
+      "saga_result": null,
+      "telemetry": {
+        "engine": "qdrant",
+        "p50_latency_ms": 1.5916334661354583,
+        "p95_latency_ms": 2.45398406374502,
+        "p99_latency_ms": 4.171739130434794,
+        "rps": 33.17241379310345,
+        "error_rate": 0.0,
+        "cpu_throttled_ratio": 0.0,
+        "memory_usage_mb": 256.8,
+        "cpu_percent": 2.36
+      }
+    },
+    {
+      "engine": "vespa",
+      "seeded_items": 5000,
+      "traffic": {
+        "total_requests": 1000,
+        "succeeded": 1000,
+        "failed": 0,
+        "elapsed_seconds": 3.489365293999981,
+        "achieved_rps": 286.5850708492791
+      },
+      "verdict": {
+        "is_sla_breached": false,
+        "action": "PROCEED",
+        "stability_score": 4,
+        "source": "deterministic_fallback"
+      },
+      "saga_result": null,
+      "telemetry": {
+        "engine": "vespa",
+        "p50_latency_ms": 3.7948495370370376,
+        "p95_latency_ms": 6.645348837209301,
+        "p99_latency_ms": 16.735714285714373,
+        "rps": 33.0,
+        "error_rate": 0.0,
+        "cpu_throttled_ratio": 0.0,
+        "memory_usage_mb": 3519.49,
+        "cpu_percent": 33.27
+      }
+    },
+    {
+      "engine": "milvus",
+      "seeded_items": 5000,
+      "traffic": {
+        "total_requests": 1000,
+        "succeeded": 1000,
+        "failed": 0,
+        "elapsed_seconds": 3.6500791380003648,
+        "achieved_rps": 273.9666626920953
+      },
+      "verdict": {
+        "is_sla_breached": false,
+        "action": "PROCEED",
+        "stability_score": 4,
+        "source": "deterministic_fallback"
+      },
+      "saga_result": null,
+      "telemetry": {
+        "engine": "milvus",
+        "p50_latency_ms": 6.05119825708061,
+        "p95_latency_ms": 14.744999999999994,
+        "p99_latency_ms": 21.620833333333344,
+        "rps": 31.413793103448278,
+        "error_rate": 0.0,
+        "cpu_throttled_ratio": 0.0,
+        "memory_usage_mb": 415.9,
+        "cpu_percent": 7.28
+      }
+    }
+  ],
+  "fastest_rps_engine": "qdrant",
+  "lowest_p99_engine": "qdrant",
+  "all_sla_compliant": true,
+  "lowest_memory_engine": "pgvector"
+}

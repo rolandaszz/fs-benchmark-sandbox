@@ -134,16 +134,16 @@ type milvusFieldSchema struct {
 
 type milvusIndexParam struct {
 	FieldName  string         `json:"fieldName"`
-	MetricType string         `json:"metricType"`
+	MetricType string         `json:"metricType,omitempty"`
 	IndexName  string         `json:"indexName"`
 	IndexType  string         `json:"indexType"`
-	Params     map[string]any `json:"params"`
+	Params     map[string]any `json:"params,omitempty"`
 }
 
 type milvusCreateCollectionRequest struct {
-	CollectionName string              `json:"collectionName"`
-	Schema         map[string]any      `json:"schema"`
-	IndexParams    []milvusIndexParam  `json:"indexParams"`
+	CollectionName string             `json:"collectionName"`
+	Schema         map[string]any     `json:"schema"`
+	IndexParams    []milvusIndexParam `json:"indexParams"`
 }
 
 func (b *MilvusBackend) ensureCollection(ctx context.Context) error {
@@ -183,7 +183,7 @@ func (b *MilvusBackend) ensureCollection(ctx context.Context) error {
 		return nil
 	}
 
-	// Create collection with schema, partition key, and HNSW index
+	// Create collection with schema, scalar indexes, and HNSW index
 	createReq := milvusCreateCollectionRequest{
 		CollectionName: b.collection,
 		Schema: map[string]any{
@@ -224,7 +224,6 @@ func (b *MilvusBackend) ensureCollection(ctx context.Context) error {
 				{
 					FieldName:      "seller_country",
 					DataType:       "VarChar",
-					IsPartitionKey: true,
 					ElementTypeParams: &milvusElementParams{
 						MaxLength: "8",
 					},
@@ -245,6 +244,16 @@ func (b *MilvusBackend) ensureCollection(ctx context.Context) error {
 					"M":              16,
 					"efConstruction": 64,
 				},
+			},
+			{
+				FieldName: "seller_country",
+				IndexName: "seller_country_inv",
+				IndexType: "INVERTED",
+			},
+			{
+				FieldName: "price_eur",
+				IndexName: "price_eur_inv",
+				IndexType: "INVERTED",
 			},
 		},
 	}
@@ -339,9 +348,10 @@ func (b *MilvusBackend) UpsertItems(ctx context.Context, items []*vfsv1.ItemFeat
 }
 
 type milvusGetRequest struct {
-	CollectionName string   `json:"collectionName"`
-	ID             []string `json:"id"`
-	OutputFields   []string `json:"outputFields"`
+	CollectionName   string   `json:"collectionName"`
+	ID               []string `json:"id"`
+	OutputFields     []string `json:"outputFields"`
+	ConsistencyLevel string   `json:"consistencyLevel,omitempty"`
 }
 
 type milvusGetResp struct {
@@ -361,6 +371,7 @@ func (b *MilvusBackend) BatchGetItems(ctx context.Context, itemIDs []string) ([]
 		OutputFields: []string{
 			"item_id", "embedding", "brand_id", "category", "price_eur", "seller_country", "updated_at_unix_ms",
 		},
+		ConsistencyLevel: "Eventually",
 	}
 
 	var res milvusGetResp
@@ -416,13 +427,14 @@ type milvusSearchParams struct {
 }
 
 type milvusSearchRequest struct {
-	CollectionName string             `json:"collectionName"`
-	Data           [][]float32        `json:"data"`
-	AnnsField      string             `json:"annsField"`
-	Limit          uint32             `json:"limit"`
-	Filter         string             `json:"filter,omitempty"`
-	OutputFields   []string           `json:"outputFields"`
-	SearchParams   milvusSearchParams `json:"searchParams"`
+	CollectionName   string             `json:"collectionName"`
+	Data             [][]float32        `json:"data"`
+	AnnsField        string             `json:"annsField"`
+	Limit            uint32             `json:"limit"`
+	Filter           string             `json:"filter,omitempty"`
+	OutputFields     []string           `json:"outputFields"`
+	ConsistencyLevel string             `json:"consistencyLevel,omitempty"`
+	SearchParams     milvusSearchParams `json:"searchParams"`
 }
 
 type milvusSearchResp struct {
@@ -465,10 +477,11 @@ func (b *MilvusBackend) SearchSimilar(
 		OutputFields: []string{
 			"item_id", "brand_id", "category", "price_eur", "seller_country", "updated_at_unix_ms",
 		},
+		ConsistencyLevel: "Eventually",
 		SearchParams: milvusSearchParams{
 			MetricType: "COSINE",
 			Params: map[string]int{
-				"ef": 32,
+				"ef": 24,
 			},
 		},
 	}

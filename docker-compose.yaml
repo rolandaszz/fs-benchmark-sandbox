@@ -110,7 +110,7 @@ services:
       - vfs_bench_net
 
   milvus:
-    image: milvusdb/milvus:v2.4.15
+    image: milvusdb/milvus:v2.5.27
     container_name: vfs-milvus
     hostname: milvus
     restart: unless-stopped

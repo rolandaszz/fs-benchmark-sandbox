@@ -6,13 +6,24 @@ etcd:
 
 common:
   storageType: local
+  simdType: sse4_2 # Validated on pre-AVX2 Intel Core i7-2600K (Sandy Bridge)
 
 localStorage:
   path: /var/lib/milvus/data
 
+proxy:
+  ginLogging: false # Disable per-request Gin HTTP stdout logging on hot path
+  accessLog:
+    enable: false
+
+indexCoord:
+  segment:
+    minSegmentNumRowsToEnableIndex: 512 # Ensure 5,000-row catalog segments build HNSW index
+
 queryNode:
   cache:
     memoryLimit: 1073741824 # 1GB cache cap within 4GB container limit
-
-knowhere:
-  simdType: sse4_2 # Compatible with pre-AVX2 Intel CPUs (Sandy Bridge+)
+  segcore:
+    knowhereThreadPoolNumRatio: 8
+  scheduler:
+    maxReadConcurrentRatio: 4 # Allow 4 * 4 vCPUs = 16 concurrent read tasks (unblocks concurrency=8)

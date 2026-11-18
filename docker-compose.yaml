@@ -109,6 +109,43 @@ services:
     networks:
       - vfs_bench_net
 
+  milvus:
+    image: milvusdb/milvus:v2.5.27
+    container_name: vfs-milvus
+    hostname: milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: "/var/lib/milvus/etcd"
+      COMMON_STORAGETYPE: "local"
+      KNOWHERE_SIMD_TYPE: "sse4_2"
+    cpus: 4.0
+    mem_limit: 4g
+    memswap_limit: 4g
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 4G
+        reservations:
+          cpus: "1.0"
+          memory: 1G
+    volumes:
+      - milvus_data:/var/lib/milvus
+      - ./solution/engine_adapters/milvus/milvus.yaml:/milvus/configs/user.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9091/healthz || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 25
+      start_period: 15s
+    networks:
+      - vfs_bench_net
+
   proxy:
     build:
       context: .
@@ -126,6 +163,7 @@ services:
       QDRANT_GRPC_URL: "http://qdrant:6334"
       VESPA_URL: "http://vespa:8080"
       VESPA_CONFIG_URL: "http://vespa:19071"
+      MILVUS_URL: "http://milvus:19530"
     cpus: 2.0
     mem_limit: 512m
     deploy:
@@ -137,6 +175,8 @@ services:
       pgvector:
         condition: service_healthy
       qdrant:
+        condition: service_healthy
+      milvus:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/healthz || exit 1"]
@@ -211,4 +251,5 @@ volumes:
   pgvector_data:
   qdrant_data:
   vespa_data:
+  milvus_data:
   prometheus_data:

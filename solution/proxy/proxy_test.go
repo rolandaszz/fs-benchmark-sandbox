@@ -598,3 +598,135 @@ func TestVespaBackendMock(t *testing.T) {
 		t.Fatalf("expected CosineSimilarity 0.98, got %f", hits[0].GetCosineSimilarity())
 	}
 }
+
+func TestMilvusBackendMock(t *testing.T) {
+	docs := make(map[string]milvusEntityDoc)
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v2/vectordb/collections/has":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+				"data": map[string]any{"has": true},
+			})
+			return
+		case "/v2/vectordb/collections/create", "/v2/vectordb/collections/load":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+			})
+			return
+		case "/v2/vectordb/entities/upsert":
+			var req milvusUpsertRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			for _, doc := range req.Data {
+				docs[doc.ItemID] = doc
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+				"data": map[string]any{"upsertCount": len(req.Data)},
+			})
+			return
+		case "/v2/vectordb/entities/get":
+			var req milvusGetRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			var found []milvusEntityDoc
+			for _, id := range req.ID {
+				if d, ok := docs[id]; ok {
+					found = append(found, d)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+				"data": found,
+			})
+			return
+		case "/v2/vectordb/entities/search":
+			var hits []milvusEntityDoc
+			for _, d := range docs {
+				d.Distance = 0.95
+				hits = append(hits, d)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0,
+				"data": hits,
+			})
+			return
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	backend, err := NewMilvusBackend(ctx, server.URL, "items")
+	if err != nil {
+		t.Fatalf("failed to create MilvusBackend: %v", err)
+	}
+	defer backend.Close()
+
+	if backend.Name() != "milvus" {
+		t.Fatalf("expected backend name 'milvus', got %q", backend.Name())
+	}
+
+	if err := backend.Ping(ctx); err != nil {
+		t.Fatalf("Ping failed: %v", err)
+	}
+
+	testItem := &vfsv1.ItemFeatures{
+		ItemId:          "item-mv-001",
+		Embedding:       makeTestEmbedding(0.55),
+		BrandId:         "brand-mv-1",
+		Category:        "bags",
+		PriceEur:        49.50,
+		SellerCountry:   "FR",
+		UpdatedAtUnixMs: 1700000000000,
+	}
+
+	upserted, err := backend.UpsertItems(ctx, []*vfsv1.ItemFeatures{testItem})
+	if err != nil {
+		t.Fatalf("UpsertItems failed: %v", err)
+	}
+	if upserted != 1 {
+		t.Fatalf("expected upserted 1, got %d", upserted)
+	}
+
+	got, found, err := backend.GetItem(ctx, "item-mv-001")
+	if err != nil {
+		t.Fatalf("GetItem failed: %v", err)
+	}
+	if !found || got.GetItemId() != "item-mv-001" {
+		t.Fatalf("GetItem failed, found=%v, item=%v", found, got)
+	}
+
+	items, missing, err := backend.BatchGetItems(ctx, []string{"item-mv-001", "missing-id"})
+	if err != nil {
+		t.Fatalf("BatchGetItems failed: %v", err)
+	}
+	if len(items) != 1 || len(missing) != 1 {
+		t.Fatalf("unexpected BatchGetItems result: items=%d, missing=%d", len(items), len(missing))
+	}
+
+	hits, err := backend.SearchSimilar(ctx, makeTestEmbedding(0.55), 10, 50.0, []string{"FR"})
+	if err != nil {
+		t.Fatalf("SearchSimilar failed: %v", err)
+	}
+	if len(hits) != 1 || hits[0].GetItem().GetItemId() != "item-mv-001" {
+		t.Fatalf("unexpected SearchSimilar hits: %v", hits)
+	}
+	if hits[0].GetCosineSimilarity() != 0.95 {
+		t.Fatalf("expected CosineSimilarity 0.95, got %f", hits[0].GetCosineSimilarity())
+	}
+}

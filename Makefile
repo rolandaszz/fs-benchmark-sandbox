@@ -75,7 +75,7 @@ up: ## Start single-target pgvector, ConnectRPC proxy, and Prometheus via Docker
 	docker compose up -d --build
 
 down: ## Tear down Docker Compose containers and networks cleanly
-	docker compose --profile temporal --profile vespa down --remove-orphans
+	docker compose --profile temporal --profile vespa --profile milvus down --remove-orphans
 
 venv: ## Sync local Python virtual environment from deterministic uv.lock
 	@if [ ! -x "$(PYTEST)" ]; then \

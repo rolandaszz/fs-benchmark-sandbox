@@ -65,6 +65,9 @@ python3 -m harness.orchestrator --engine qdrant --seed-count 5000 --requests 200
 
 # Benchmark Vespa (Target 3)
 python3 -m harness.orchestrator --engine vespa --seed-count 5000 --requests 2000 --skip-seed --concurrency 8
+
+# Benchmark Milvus (Target 4)
+python3 -m harness.orchestrator --engine milvus --seed-count 5000 --requests 2000 --skip-seed --concurrency 8
 ```
 
 #### 4. Run Unit & Contract Tests
@@ -89,10 +92,11 @@ make test-unit
 │       └── v1/
 │           └── feature_store.proto # ConnectRPC schema (768-dim vectors + metadata)
 ├── solution/
-│   ├── proxy/                      # Go L7 h2c proxy (proxy.go, qdrant.go, vespa.go), Dockerfile & tests
+│   ├── proxy/                      # Go L7 h2c proxy (proxy.go, qdrant.go, vespa.go, milvus.go), Dockerfile & tests
 │   └── engine_adapters/
 │       ├── pgvector/               # Target 1 DDL & HNSW cosine index configuration
-│       └── vespa/                  # Target 3 application package (services.xml & item.sd schema)
+│       ├── vespa/                  # Target 3 application package (services.xml & item.sd schema)
+│       └── milvus/                 # Target 4 standalone configuration (milvus.yaml)
 ├── harness/
 │   ├── orchestrator.py             # Sequential container lifecycle & cache purger
 │   ├── traffic_agent.py            # High-throughput AsyncIO synthetic load generator

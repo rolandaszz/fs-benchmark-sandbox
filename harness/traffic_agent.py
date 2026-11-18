@@ -65,7 +65,7 @@ class TrafficAgent:
     async def seed_catalog(self, item_count: int = 250, batch_size: int = 50) -> int:
         """Populate the active engine through UpsertItemFeatures."""
         inserted = 0
-        async with httpx.AsyncClient(http2=True, base_url=self.proxy_url, timeout=10.0) as client:
+        async with httpx.AsyncClient(http1=False, http2=True, base_url=self.proxy_url, timeout=10.0) as client:
             for offset in range(0, item_count, batch_size):
                 batch_items: list[dict[str, Any]] = []
                 for idx in range(offset, min(offset + batch_size, item_count)):
@@ -96,7 +96,7 @@ class TrafficAgent:
         failed = 0
         start = time.perf_counter()
 
-        async with httpx.AsyncClient(http2=True, base_url=self.proxy_url, timeout=5.0) as client:
+        async with httpx.AsyncClient(http1=False, http2=True, base_url=self.proxy_url, timeout=5.0) as client:
 
             async def _one_request(req_idx: int) -> bool:
                 async with semaphore:

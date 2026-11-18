@@ -85,8 +85,8 @@ venv: ## Sync local Python virtual environment from deterministic uv.lock
 test-unit: venv ## Execute Python unit tests in tests/unit/
 	$(VENV_DIR)/bin/python -m pytest -v
 
-benchmark-all: venv ## Run sequential multi-engine benchmark suite and generate docs/benchmark_report.md
-	$(VENV_DIR)/bin/python -m harness.orchestrator --all-engines --seed-count 5000 --requests 1000 --skip-seed --concurrency 8 --report-out docs/benchmark_report.md
+benchmark-all: venv ## Run sequential multi-engine benchmark suite and generate docs/benchmark_report.{md,json}
+	$(VENV_DIR)/bin/python -m harness.orchestrator --all-engines --seed-count 5000 --requests 1000 --skip-seed --concurrency 8 --report-out docs/benchmark_report.md --json-out docs/benchmark_report.json
 
 clean: ## Purge Go binaries, test caches, and coverage artifacts idempotently
 	rm -rf bin/ coverage.out .pytest_cache .ruff_cache

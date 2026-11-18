@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from harness.chaos_agent import CgroupLimits, ChaosAgent, ChaosValidationError, NetemProfile
+from harness.chaos_agent import (
+    CgroupLimits,
+    ChaosAgent,
+    ChaosValidationError,
+    NetemProfile,
+    _parse_memory_mib,
+)
 
 
 def test_netem_command_generation_and_bounds() -> None:
@@ -49,3 +55,10 @@ def test_cgroup_v2_path_confinement() -> None:
 
     with pytest.raises(ChaosValidationError):
         agent.apply_cgroup_v2_limits(CgroupLimits(cgroup_path="/sys/fs/cgroup_evil"))
+
+
+def test_parse_memory_mib_units() -> None:
+    assert _parse_memory_mib("380.5MiB / 4GiB") == 380.5
+    assert _parse_memory_mib("1.5GiB / 4GiB") == 1536.0
+    assert _parse_memory_mib("2048KiB / 4GiB") == 2.0
+    assert _parse_memory_mib("invalid") == 0.0

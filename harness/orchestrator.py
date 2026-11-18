@@ -36,6 +36,7 @@ class MultiEngineSuiteReport:
     fastest_rps_engine: str
     lowest_p99_engine: str
     all_sla_compliant: bool
+    lowest_memory_engine: str = ""
 
 
 class BenchmarkOrchestrator:
@@ -84,6 +85,9 @@ class BenchmarkOrchestrator:
                 catalog_size=seed_count,
             )
             snapshot = await self.evaluator.query_prometheus_snapshot(engine=self.engine)
+            mem_mib, cpu_pct = self.chaos_agent.sample_container_resources(self.engine)
+            snapshot.memory_usage_mb = mem_mib
+            snapshot.cpu_percent = cpu_pct
             if chaos_delay_ms > 0 and self.dry_run_chaos:
                 snapshot.p99_latency_ms += float(chaos_delay_ms)
                 snapshot.p95_latency_ms += float(chaos_delay_ms) * 0.8
@@ -153,12 +157,19 @@ class BenchmarkOrchestrator:
             else ""
         )
         all_sla_compliant = all(not bool(r.verdict.get("is_sla_breached", False)) for r in reports)
+        positive_mem_runs = [r for r in reports if float(r.telemetry.get("memory_usage_mb", 0.0)) > 0.0]
+        lowest_memory_engine = (
+            min(positive_mem_runs, key=lambda r: float(r.telemetry.get("memory_usage_mb", float("inf")))).engine
+            if positive_mem_runs
+            else (reports[0].engine if reports else "")
+        )
 
         return MultiEngineSuiteReport(
             runs=reports,
             fastest_rps_engine=fastest_rps_engine,
             lowest_p99_engine=lowest_p99_engine,
             all_sla_compliant=all_sla_compliant,
+            lowest_memory_engine=lowest_memory_engine,
         )
 
 
@@ -171,11 +182,16 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--skip-seed", action="store_true", help="Skip re-seeding if catalog is already populated")
     parser.add_argument("--chaos-delay-ms", type=int, default=0, help="Inject tc netem delay_ms fault during run")
+    parser.add_argument("--live-chaos", action="store_true", help="Execute real kernel tc netem and cache drop commands (requires sudo/root)")
     parser.add_argument("--report-out", default="", help="Optional path to write Markdown synthesis report")
     parser.add_argument("--json-out", default="", help="Optional path to write JSON suite report")
     args = parser.parse_args()
 
-    orchestrator = BenchmarkOrchestrator(engine=args.engine, concurrency=args.concurrency)
+    orchestrator = BenchmarkOrchestrator(
+        engine=args.engine,
+        concurrency=args.concurrency,
+        dry_run_chaos=not args.live_chaos,
+    )
     if args.all_engines:
         suite_report = asyncio.run(
             orchestrator.execute_multi_engine_suite(

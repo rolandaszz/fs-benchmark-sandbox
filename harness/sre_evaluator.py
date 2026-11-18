@@ -24,7 +24,7 @@ class MitigationAction(StrEnum):
 
 
 class TelemetrySnapshot(BaseModel):
-    """Point-in-time golden signal snapshot sampled from Prometheus."""
+    """Point-in-time golden signal snapshot sampled from Prometheus and container cgroups."""
 
     engine: str
     p50_latency_ms: float = Field(default=0.0, ge=0.0)
@@ -33,6 +33,8 @@ class TelemetrySnapshot(BaseModel):
     rps: float = Field(ge=0.0)
     error_rate: float = Field(ge=0.0, le=1.0)
     cpu_throttled_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    memory_usage_mb: float = Field(default=0.0, ge=0.0)
+    cpu_percent: float = Field(default=0.0, ge=0.0)
 
 
 class DecisionVerdict(BaseModel):

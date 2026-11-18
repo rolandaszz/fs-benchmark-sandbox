@@ -1,4 +1,4 @@
-"""Executive Markdown and JSON report synthesizer for multi-engine VFS benchmark suites."""
+"""Markdown and JSON report synthesizer for multi-engine VFS benchmark suites."""
 
 from __future__ import annotations
 
@@ -19,17 +19,18 @@ def render_markdown_report(suite: MultiEngineSuiteReport) -> str:
     lines: list[str] = [
         "# Vector Feature Store (VFS) Multi-Engine Benchmark Report",
         "",
-        "## Executive Summary",
+        "## Summary",
         "",
         f"- **Fastest Throughput Engine**: `{suite.fastest_rps_engine}`",
         f"- **Lowest Tail-Latency (p99) Engine**: `{suite.lowest_p99_engine}`",
+        f"- **Lowest Memory Footprint Engine**: `{suite.lowest_memory_engine}`",
         f"- **SLA Target**: `p99 <= {SLA_P99_THRESHOLD_MS:.1f} ms`",
         f"- **Suite SLA Status**: **{compliance_badge}**",
         "",
-        "## Comparative Performance & SRE Triage Matrix",
+        "## Comparative Performance, Resource Footprint & SRE Triage Matrix",
         "",
-        "| Engine | Achieved RPS | p50 (ms) | p95 (ms) | p99 (ms) | Error Rate | Stability (1-5) | SRE Action | Saga Mitigation |",
-        "| :--- | ---: | ---: | ---: | ---: | ---: | :---: | :--- | :--- |",
+        "| Engine | Achieved RPS | p50 (ms) | p95 (ms) | p99 (ms) | Memory (MiB) | CPU (%) | Error Rate | Stability (1-5) | SRE Action | Saga Mitigation |",
+        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: | :--- | :--- |",
     ]
 
     for run in suite.runs:
@@ -37,6 +38,8 @@ def render_markdown_report(suite: MultiEngineSuiteReport) -> str:
         p50 = float(tel.get("p50_latency_ms", 0.0))
         p95 = float(tel.get("p95_latency_ms", 0.0))
         p99 = float(tel.get("p99_latency_ms", 0.0))
+        mem_mib = float(tel.get("memory_usage_mb", 0.0))
+        cpu_pct = float(tel.get("cpu_percent", 0.0))
         err_rate = float(tel.get("error_rate", 0.0)) * 100.0
         score = run.verdict.get("stability_score", "-")
         action = str(run.verdict.get("action", "-"))
@@ -46,7 +49,7 @@ def render_markdown_report(suite: MultiEngineSuiteReport) -> str:
 
         lines.append(
             f"| `{run.engine}` | {run.traffic.achieved_rps:.2f} | {p50:.2f} | {p95:.2f} | "
-            f"{p99:.2f} | {err_rate:.2f}% | {score} | `{action}` | `{saga_str}` |"
+            f"{p99:.2f} | {mem_mib:.1f} | {cpu_pct:.1f}% | {err_rate:.2f}% | {score} | `{action}` | `{saga_str}` |"
         )
 
     lines.extend(
@@ -54,9 +57,10 @@ def render_markdown_report(suite: MultiEngineSuiteReport) -> str:
             "",
             "## Workload & Architectural Notes",
             "",
+            "- **Host Hardware**: Ubuntu 24.04.5 LTS (Kernel 6.8.0), Intel Core i7-2600K (8 threads @ 3.8GHz), 16 GiB RAM.",
             "- **Workload Mix**: 80% filtered ANN cosine search (`price_eur <= 50.0`, `seller_country`), 15% real-time batch upsert, 5% point lookup.",
-            "- **Isolation**: Sequential target execution with OS page-cache drop (`sync && drop_caches`) and cooldown window between engines.",
-            "- **Out-of-Band Control Plane**: Prometheus 1s histogram scrape evaluated via OpenAI Decisions API (`gpt-6-luna`) contract with Temporal LIFO Saga mitigation.",
+            "- **Isolation**: Sequential target execution with 4GB container cgroup caps, OS page-cache drop (`sync && drop_caches`), and cooldown window between engines.",
+            "- **Telemetry & Control Plane**: Telemetry percentiles and container cgroup resource metrics were sampled directly by the test harness; SRE triage was evaluated offline via local deterministic rule ladder (`source: deterministic_fallback`, implementing the typed `gpt-6-luna` schema contract). Live OpenAI Decisions API requests and Temporal LIFO Saga mitigations were not executed during this benchmark run.",
             "",
         ]
     )
